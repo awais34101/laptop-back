@@ -13,7 +13,7 @@ async function createAdmin() {
   await User.deleteMany({ role: 'admin' });
   // Create new admin
   const hash = await bcrypt.hash('Awais123', 10);
-  await User.create({
+  const newUser = await User.create({
     name: 'Awais',
     email: 'awaiszafar704@gmail.com',
     password: hash,
@@ -21,7 +21,7 @@ async function createAdmin() {
     canViewFinancials: true,
     isActive: true
   });
-  console.log('New admin user created.');
+  console.log('New admin user created:', newUser);
   await mongoose.disconnect();
 }
 createAdmin();

@@ -40,7 +40,7 @@ try {
 
 const app = express();
 app.use(cors({
-  origin: 'https://salat-frontend.vercel.app',
+  origin: 'https://salat-fronted.vercel.app',
   credentials: true
 }));
 app.use(express.json());

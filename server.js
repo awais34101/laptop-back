@@ -37,8 +37,12 @@ try {
   console.log('Connecting to MongoDB (URI hidden for security)');
 }
 
+
 const app = express();
-app.use(cors());
+app.use(cors({
+  origin: 'https://salat-fronted.vercel.app',
+  credentials: true
+}));
 app.use(express.json());
 
 

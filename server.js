@@ -58,7 +58,12 @@ app.use('/api/settings', settingsRoutes);
 app.use('/api/alerts', alertRoutes);
 app.use('/api/technicians', technicianRoutes);
 app.use('/api/technician-stats', technicianStatsRoutes);
+
 app.use('/api/users', userRoutes);
+
+// Error handler middleware (must be after all routes)
+import errorHandler from './middleware/errorHandler.js';
+app.use(errorHandler);
 
 mongoose.connect(MONGO_URI, {
   useNewUrlParser: true,

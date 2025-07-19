@@ -24,6 +24,12 @@ router.post('/login', async (req, res) => {
   console.log('LOGIN ATTEMPT:', { email });
   // Allow login by email or username
   const user = await User.findOne({ $or: [ { email }, { name: email } ] });
+  console.log('LOGIN USER FOUND:', user ? {
+    email: user.email,
+    name: user.name,
+    isActive: user.isActive,
+    password: user.password
+  } : null);
   if (!user) {
     console.log('LOGIN FAIL: user not found');
     return res.status(401).json({ error: 'Invalid credentials or inactive user' });
@@ -33,6 +39,7 @@ router.post('/login', async (req, res) => {
     return res.status(401).json({ error: 'Invalid credentials or inactive user' });
   }
   const valid = await bcrypt.compare(password, user.password);
+  console.log('LOGIN PASSWORD CHECK:', { inputPassword: password, userPasswordHash: user.password, valid });
   if (!valid) {
     console.log('LOGIN FAIL: password incorrect');
     return res.status(401).json({ error: 'Invalid credentials' });

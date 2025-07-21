@@ -3,7 +3,6 @@ import mongoose from 'mongoose';
 import cors from 'cors';
 import dotenv from 'dotenv';
 
-
 import itemRoutes from './routes/itemRoutes.js';
 import purchaseRoutes from './routes/purchaseRoutes.js';
 import warehouseRoutes from './routes/warehouseRoutes.js';
@@ -28,23 +27,26 @@ if (!MONGO_URI) {
   process.exit(1);
 }
 
-// For debugging: log only the protocol/host/db, not credentials
-try {
-  const safeUri = new URL(MONGO_URI);
-  safeUri.password = safeUri.username = '';
-  console.log('Connecting to MongoDB at:', safeUri.origin + safeUri.pathname);
-} catch {
-  console.log('Connecting to MongoDB (URI hidden for security)');
-}
-
+// CORS Fix: allow both localhost and Vercel
+const allowedOrigins = [
+  'http://localhost:3000',
+  'https://salat-fronted.vercel.app'
+];
 
 const app = express();
+
 app.use(cors({
-  origin: 'https://salat-fronted.vercel.app',
+  origin: function (origin, callback) {
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('❌ Not allowed by CORS'));
+    }
+  },
   credentials: true
 }));
-app.use(express.json());
 
+app.use(express.json());
 
 // API routes
 app.use('/api/items', itemRoutes);
@@ -58,12 +60,20 @@ app.use('/api/settings', settingsRoutes);
 app.use('/api/alerts', alertRoutes);
 app.use('/api/technicians', technicianRoutes);
 app.use('/api/technician-stats', technicianStatsRoutes);
-
 app.use('/api/users', userRoutes);
 
-// Error handler middleware (must be after all routes)
+// Error handler (must come after all routes)
 import errorHandler from './middleware/errorHandler.js';
 app.use(errorHandler);
+
+// Connect to MongoDB and start server
+try {
+  const safeUri = new URL(MONGO_URI);
+  safeUri.password = safeUri.username = '';
+  console.log('Connecting to MongoDB at:', safeUri.origin + safeUri.pathname);
+} catch {
+  console.log('Connecting to MongoDB (URI hidden for security)');
+}
 
 mongoose.connect(MONGO_URI, {
   useNewUrlParser: true,
@@ -71,7 +81,7 @@ mongoose.connect(MONGO_URI, {
 })
   .then(() => {
     console.log('✅ MongoDB connected');
-    app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+    app.listen(PORT, () => console.log(`🚀 Server running on http://localhost:${PORT}`));
   })
   .catch((err) => {
     console.error('❌ MongoDB connection error:', err.message);

@@ -1,3 +1,14 @@
+// Delete a sale invoice
+export const deleteSale = async (req, res) => {
+  try {
+    const sale = await Sale.findByIdAndDelete(req.params.id);
+    if (!sale) return res.status(404).json({ error: 'Sale not found' });
+    // Optionally, update store stock here if needed
+    res.json({ message: 'Sale deleted successfully' });
+  } catch (err) {
+    res.status(500).json({ error: 'Server error' });
+  }
+};
 
 import Sale from '../models/Sale.js';
 import Store from '../models/Store.js';

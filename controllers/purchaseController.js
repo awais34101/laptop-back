@@ -1,3 +1,14 @@
+// Delete a purchase invoice
+export const deletePurchase = async (req, res) => {
+  try {
+    const purchase = await Purchase.findByIdAndDelete(req.params.id);
+    if (!purchase) return res.status(404).json({ error: 'Purchase not found' });
+    // Optionally, you can also update warehouse stock here if needed
+    res.json({ message: 'Purchase deleted successfully' });
+  } catch (err) {
+    res.status(500).json({ error: 'Server error' });
+  }
+};
 export const updatePurchase = async (req, res) => {
   try {
     const { error } = purchaseSchema.validate(req.body);

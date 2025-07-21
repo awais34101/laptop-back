@@ -16,7 +16,6 @@ import technicianRoutes from './routes/technicianRoutes.js';
 import technicianStatsRoutes from './routes/technicianStatsRoutes.js';
 import userRoutes from './routes/userRoutes.js';
 
-// Load .env before anything else
 dotenv.config();
 
 const MONGO_URI = process.env.MONGO_URI || process.env.MONGODB_URI || '';
@@ -27,10 +26,19 @@ if (!MONGO_URI) {
   process.exit(1);
 }
 
-// CORS Fix: allow both localhost and Vercel
+// ✅ Clean MongoDB log (no null warning)
+if (MONGO_URI.includes('@')) {
+  const cleanedUri = MONGO_URI.replace(/\/\/.*?:.*?@/, '//<user>:<pass>@');
+  console.log('✅ Connecting to MongoDB at:', cleanedUri);
+} else {
+  console.log('✅ Connecting to MongoDB at:', MONGO_URI);
+}
+
+// ✅ CORS: Allow both localhost + Vercel domains
 const allowedOrigins = [
   'http://localhost:3000',
-  'https://salat-fronted.vercel.app'
+  'https://salat-fronted.vercel.app',
+  'https://salat-fronted-muhammad-awais-s-projects-bf5a0371.vercel.app'
 ];
 
 const app = express();
@@ -40,7 +48,7 @@ app.use(cors({
     if (!origin || allowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
-      callback(new Error('❌ Not allowed by CORS'));
+      callback(new Error('❌ Not allowed by CORS: ' + origin));
     }
   },
   credentials: true
@@ -48,7 +56,7 @@ app.use(cors({
 
 app.use(express.json());
 
-// API routes
+// API Routes
 app.use('/api/items', itemRoutes);
 app.use('/api/purchases', purchaseRoutes);
 app.use('/api/warehouse', warehouseRoutes);
@@ -62,26 +70,18 @@ app.use('/api/technicians', technicianRoutes);
 app.use('/api/technician-stats', technicianStatsRoutes);
 app.use('/api/users', userRoutes);
 
-// Error handler (must come after all routes)
+// Error handler
 import errorHandler from './middleware/errorHandler.js';
 app.use(errorHandler);
 
-// Connect to MongoDB and start server
-try {
-  const safeUri = new URL(MONGO_URI);
-  safeUri.password = safeUri.username = '';
-  console.log('Connecting to MongoDB at:', safeUri.origin + safeUri.pathname);
-} catch {
-  console.log('Connecting to MongoDB (URI hidden for security)');
-}
-
+// Connect to DB + Start server
 mongoose.connect(MONGO_URI, {
   useNewUrlParser: true,
   useUnifiedTopology: true,
 })
   .then(() => {
     console.log('✅ MongoDB connected');
-    app.listen(PORT, () => console.log(`🚀 Server running on http://localhost:${PORT}`));
+    app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
   })
   .catch((err) => {
     console.error('❌ MongoDB connection error:', err.message);

@@ -37,7 +37,11 @@ export const createTransfer = async (req, res) => {
         store.remaining_quantity += quantity;
         await store.save();
       } else {
-        await Store.create({ item, remaining_quantity: quantity });
+        // Double-check no duplicate store record exists before creating
+        const existingStore = await Store.findOne({ item });
+        if (!existingStore) {
+          await Store.create({ item, remaining_quantity: quantity });
+        }
       }
     } else if (direction === 'store-to-warehouse') {
       if (!store || store.remaining_quantity < quantity) {

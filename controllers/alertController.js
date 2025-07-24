@@ -9,12 +9,12 @@ export const getSlowMoving = async (req, res) => {
     const settings = await Settings.findOne();
     const threshold = settings?.slow_moving_days || 30;
     const cutoff = new Date(Date.now() - threshold * 24 * 60 * 60 * 1000);
-    // Slow moving items in Store
+    // Slow moving items in Store (per-store last_sale_date)
     const store = await Store.find().populate('item');
-    const slowStore = store.filter(s => s.item && s.item.last_sale_date && new Date(s.item.last_sale_date) < cutoff);
-    // Slow moving items in Store2
+    const slowStore = store.filter(s => s.item && s.last_sale_date && new Date(s.last_sale_date) < cutoff);
+    // Slow moving items in Store2 (per-store last_sale_date)
     const store2 = await Store2.find().populate('item');
-    const slowStore2 = store2.filter(s => s.item && s.item.last_sale_date && new Date(s.item.last_sale_date) < cutoff);
+    const slowStore2 = store2.filter(s => s.item && s.last_sale_date && new Date(s.last_sale_date) < cutoff);
     res.json({ store: slowStore, store2: slowStore2 });
   } catch (err) {
     res.status(500).json({ error: err.message });

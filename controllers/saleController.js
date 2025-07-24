@@ -60,16 +60,14 @@ export const createSale = async (req, res) => {
       }
     }
 
-    // Deduct stock and update item stats
+    // Deduct stock and update per-store sale stats
     for (const saleItem of items) {
       const store = await Store.findOne({ item: saleItem.item });
       store.remaining_quantity -= saleItem.quantity;
+      // Update per-store last_sale_date and sale_count
+      store.last_sale_date = new Date();
+      store.sale_count = (store.sale_count || 0) + saleItem.quantity;
       await store.save();
-      // Update item last_sale_date and sale_count
-      const itemDoc = await Item.findById(saleItem.item);
-      itemDoc.last_sale_date = new Date();
-      itemDoc.sale_count = (itemDoc.sale_count || 0) + saleItem.quantity;
-      await itemDoc.save();
     }
 
     const sale = new Sale({ items, customer, invoice_number });

@@ -20,10 +20,23 @@ export default async function auth(req, res, next) {
   }
 }
 
+
 export function requireRole(role) {
   return (req, res, next) => {
     if (!req.user || req.user.role !== role) {
       return res.status(403).json({ error: 'Forbidden' });
+    }
+    next();
+  };
+}
+
+// Usage: requirePermission('items', 'edit')
+export function requirePermission(section, action) {
+  return async (req, res, next) => {
+    // req.user.permissions is available from JWT
+    const perms = req.user && req.user.permissions;
+    if (!perms || !perms[section] || !perms[section][action]) {
+      return res.status(403).json({ error: 'Insufficient permissions' });
     }
     next();
   };

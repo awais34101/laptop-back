@@ -38,12 +38,15 @@ export const createSaleStore2 = async (req, res) => {
     if (error) return res.status(400).json({ error: error.details[0].message });
     const sale = new SaleStore2(req.body);
     await sale.save();
-    // Update Store2 inventory
+    // Update Store2 inventory and per-store sale stats
     for (const i of req.body.items) {
-      await Store2.updateOne(
-        { item: i.item },
-        { $inc: { remaining_quantity: -i.quantity } }
-      );
+      const store2 = await Store2.findOne({ item: i.item });
+      if (store2) {
+        store2.remaining_quantity -= i.quantity;
+        store2.last_sale_date = new Date();
+        store2.sale_count = (store2.sale_count || 0) + i.quantity;
+        await store2.save();
+      }
     }
     res.json(sale);
   } catch (err) {

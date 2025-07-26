@@ -15,6 +15,11 @@ import alertRoutes from './routes/alertRoutes.js';
 import technicianRoutes from './routes/technicianRoutes.js';
 import technicianStatsRoutes from './routes/technicianStatsRoutes.js';
 import userRoutes from './routes/userRoutes.js';
+import technicianAssignmentRoutes from './routes/technicianAssignmentRoutes.js';
+import technicianSelfRoutes from './routes/technicianSelfRoutes.js';
+import store2Routes from './routes/store2Routes.js';
+import saleStore2Routes from './routes/saleStore2Routes.js';
+import errorHandler from './middleware/errorHandler.js';
 
 dotenv.config();
 
@@ -26,7 +31,7 @@ if (!MONGO_URI) {
   process.exit(1);
 }
 
-// ✅ Clean MongoDB log (no null warning)
+// ✅ Clean log of sensitive parts
 if (MONGO_URI.includes('@')) {
   const cleanedUri = MONGO_URI.replace(/\/\/.*?:.*?@/, '//<user>:<pass>@');
   console.log('✅ Connecting to MongoDB at:', cleanedUri);
@@ -34,11 +39,10 @@ if (MONGO_URI.includes('@')) {
   console.log('✅ Connecting to MongoDB at:', MONGO_URI);
 }
 
-// ✅ CORS: Allow both localhost + Vercel domains
+// ✅ CORS config: Allow Vercel + localhost
 const allowedOrigins = [
   'http://localhost:3000',
-  'https://salat-fronted.vercel.app',
-  'https://salat-fronted-muhammad-awais-s-projects-bf5a0371.vercel.app'
+  'https://laptop-fro.vercel.app' // ✅ Your real frontend
 ];
 
 const app = express();
@@ -56,16 +60,12 @@ app.use(cors({
 
 app.use(express.json());
 
-// API Routes
-import technicianAssignmentRoutes from './routes/technicianAssignmentRoutes.js';
-import technicianSelfRoutes from './routes/technicianSelfRoutes.js';
+// ✅ Routes
 app.use('/api/items', itemRoutes);
 app.use('/api/purchases', purchaseRoutes);
 app.use('/api/warehouse', warehouseRoutes);
 app.use('/api/transfers', transferRoutes);
 app.use('/api/store', storeRoutes);
-import store2Routes from './routes/store2Routes.js';
-import saleStore2Routes from './routes/saleStore2Routes.js';
 app.use('/api/store2', store2Routes);
 app.use('/api/sales-store2', saleStore2Routes);
 app.use('/api/sales', saleRoutes);
@@ -78,11 +78,10 @@ app.use('/api/users', userRoutes);
 app.use('/api/technician-assignments', technicianAssignmentRoutes);
 app.use('/api/technician-self', technicianSelfRoutes);
 
-// Error handler
-import errorHandler from './middleware/errorHandler.js';
+// ✅ Error handler
 app.use(errorHandler);
 
-// Connect to DB + Start server
+// ✅ Connect to DB + Start server
 mongoose.connect(MONGO_URI, {
   useNewUrlParser: true,
   useUnifiedTopology: true,

@@ -9,14 +9,16 @@ const JWT_SECRET = process.env.JWT_SECRET || 'your_jwt_secret';
 
 // Helper: sign JWT with version
 function signToken(user) {
-  return jwt.sign({
+  const payload = {
     userId: user._id,
     role: user.role,
     canViewFinancials: user.canViewFinancials,
     passwordVersion: user.passwordVersion,
     isActive: user.isActive,
     permissions: user.permissions
-  }, JWT_SECRET, { expiresIn: '1d' });
+  };
+  if (user.technicianId) payload.technicianId = user.technicianId;
+  return jwt.sign(payload, JWT_SECRET, { expiresIn: '1d' });
 }
 
 // 1. Login
@@ -32,7 +34,8 @@ router.post('/login', async (req, res) => {
   }
   // Always return full permissions for admin
   const permissions = user.getEffectivePermissions ? user.getEffectivePermissions() : (user.permissions || {});
-  const token = signToken({ ...user.toObject(), permissions });
+  const technicianId = user.technicianId || null;
+  const token = signToken({ ...user.toObject(), permissions, technicianId });
   res.json({
     token,
     user: {
@@ -40,7 +43,8 @@ router.post('/login', async (req, res) => {
       email: user.email,
       role: user.role,
       canViewFinancials: user.canViewFinancials,
-      permissions
+      permissions,
+      technicianId
     }
   });
 });
@@ -59,11 +63,13 @@ router.post('/change-password', auth, async (req, res) => {
 
 // 3. Add staff (admin only)
 router.post('/add-staff', auth, requireRole('admin'), async (req, res) => {
-  const { name, email, password, role, canViewFinancials, permissions } = req.body;
+  const { name, email, password, role, canViewFinancials, permissions, technicianId } = req.body;
+  console.log('ADD STAFF BODY:', req.body); // DEBUG
   if (await User.findOne({ email })) return res.status(400).json({ error: 'Email already exists' });
   const hash = await bcrypt.hash(password, 10);
-  const user = new User({ name, email, password: hash, role, canViewFinancials, permissions });
+  const user = new User({ name, email, password: hash, role, canViewFinancials, permissions, technicianId: role === 'technician' ? technicianId : null });
   await user.save();
+  console.log('SAVED USER:', user); // DEBUG
   res.json({ message: 'Staff added' });
 });
 
@@ -81,17 +87,24 @@ router.get('/list', auth, requireRole('admin'), async (req, res) => {
 
 // 5. Edit user (admin only)
 router.put('/:id/edit', auth, requireRole('admin'), async (req, res) => {
-  const { role, canViewFinancials, isActive, permissions } = req.body;
+  const { role, canViewFinancials, isActive, permissions, technicianId } = req.body;
+  console.log('EDIT USER BODY:', req.body); // DEBUG
   const user = await User.findById(req.params.id);
   if (!user) return res.status(404).json({ error: 'User not found' });
   user.role = role ?? user.role;
   user.canViewFinancials = canViewFinancials ?? user.canViewFinancials;
   if (permissions) user.permissions = permissions;
+  if (role === 'technician') {
+    user.technicianId = technicianId || null;
+  } else {
+    user.technicianId = null;
+  }
   if (typeof isActive === 'boolean' && user.isActive !== isActive) {
     user.isActive = isActive;
     user.passwordVersion++;
   }
   await user.save();
+  console.log('UPDATED USER:', user); // DEBUG
   res.json({ message: 'User updated' });
 });
 

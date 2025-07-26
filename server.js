@@ -58,6 +58,7 @@ app.use(express.json());
 
 // API Routes
 import technicianAssignmentRoutes from './routes/technicianAssignmentRoutes.js';
+import technicianSelfRoutes from './routes/technicianSelfRoutes.js';
 app.use('/api/items', itemRoutes);
 app.use('/api/purchases', purchaseRoutes);
 app.use('/api/warehouse', warehouseRoutes);
@@ -75,6 +76,7 @@ app.use('/api/technicians', technicianRoutes);
 app.use('/api/technician-stats', technicianStatsRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/technician-assignments', technicianAssignmentRoutes);
+app.use('/api/technician-self', technicianSelfRoutes);
 
 // Error handler
 import errorHandler from './middleware/errorHandler.js';

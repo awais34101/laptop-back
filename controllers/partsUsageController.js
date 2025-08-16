@@ -3,6 +3,8 @@ import PartsWarehouse from '../models/PartsWarehouse.js';
 import PartsStore from '../models/PartsStore.js';
 import PartsStore2 from '../models/PartsStore2.js';
 import PartsUsage from '../models/PartsUsage.js';
+import Technician from '../models/Technician.js';
+import Part from '../models/Part.js';
 
 const validLoc = ['warehouse','store','store2'];
 const useSchema = Joi.object({ from: Joi.string().valid(...validLoc).required(), technician: Joi.string().required(), items: Joi.array().items(Joi.object({ part: Joi.string().required(), quantity: Joi.number().min(1).required() })).min(1).required(), note: Joi.string().allow('') });
@@ -41,10 +43,34 @@ export const listPartsUsage = async (req, res) => {
     const page = Math.max(parseInt(req.query.page) || 1, 1);
     const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 100);
     const skip = (page - 1) * limit;
+    const q = (req.query.q || '').trim();
+    const regex = q ? new RegExp(q, 'i') : null;
+    let filter = {};
+    if (regex) {
+      const [techIds, partIds] = await Promise.all([
+        Technician.find({ name: regex }).distinct('_id'),
+        Part.find({ name: regex }).distinct('_id')
+      ]);
+      filter = { $or: [
+        { from: regex },
+        { note: regex },
+        { technician: { $in: techIds } },
+        { 'items.part': { $in: partIds } }
+      ] };
+    }
     const [total, rows] = await Promise.all([
-      PartsUsage.countDocuments(),
-      PartsUsage.find().sort({ date: -1 }).skip(skip).limit(limit).populate('items.part').populate('technician').populate('usedByUser')
+      PartsUsage.countDocuments(filter),
+      PartsUsage.find(filter).sort({ date: -1 }).skip(skip).limit(limit).populate('items.part').populate('technician').populate('usedByUser')
     ]);
     res.json({ data: rows, total, page, pageSize: limit, totalPages: Math.ceil(total/limit)||1 });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+};
+
+export const deletePartsUsage = async (req, res) => {
+  try {
+    const doc = await PartsUsage.findByIdAndDelete(req.params.id);
+    if (!doc) return res.status(404).json({ error: 'Parts usage not found' });
+    // Per requirement: do not affect inventory when deleting history
+    res.json({ success: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 };

@@ -1,7 +1,9 @@
 import mongoose from 'mongoose';
 
 const partRequestSchema = new mongoose.Schema({
-  item: { type: mongoose.Schema.Types.ObjectId, ref: 'Item', required: true },
+  // Support requests for Items (main inventory) or Parts (spare parts) via refPath
+  item: { type: mongoose.Schema.Types.ObjectId, refPath: 'itemModel', required: true },
+  itemModel: { type: String, enum: ['Item','Part'], default: 'Item', required: true },
   quantity: { type: Number, required: true, min: 1 },
   note: { type: String, default: '' },
   status: { type: String, enum: ['requested', 'approved', 'ordered', 'received', 'rejected', 'cancelled'], default: 'requested' },

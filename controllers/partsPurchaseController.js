@@ -11,11 +11,27 @@ export const listPartsPurchases = async (req, res) => {
     const page = Math.max(parseInt(req.query.page) || 1, 1);
     const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 100);
     const skip = (page - 1) * limit;
+    const q = (req.query.q || '').trim();
+    const regex = q ? new RegExp(q, 'i') : null;
+    let filter = {};
+    if (regex) {
+      const partIds = await Part.find({ name: regex }).distinct('_id');
+      filter = { $or: [{ supplier: regex }, { invoice_number: regex }, { note: regex }, { 'items.part': { $in: partIds } }] };
+    }
     const [total, rows] = await Promise.all([
-      PartsPurchase.countDocuments(),
-      PartsPurchase.find().sort({ date: -1 }).skip(skip).limit(limit).populate('items.part')
+      PartsPurchase.countDocuments(filter),
+      PartsPurchase.find(filter).sort({ date: -1 }).skip(skip).limit(limit).populate('items.part')
     ]);
     res.json({ data: rows, total, page, pageSize: limit, totalPages: Math.ceil(total/limit)||1 });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+};
+
+export const deletePartsPurchase = async (req, res) => {
+  try {
+    const doc = await PartsPurchase.findByIdAndDelete(req.params.id);
+    if (!doc) return res.status(404).json({ error: 'Parts purchase not found' });
+    // Per requirement: do not affect inventory when deleting history
+    res.json({ success: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 };
 

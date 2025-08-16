@@ -13,6 +13,9 @@ const fullPermissions = {
   store2: { view: true, edit: true, delete: true },
   settings: { view: true, edit: true },
   users: { view: true, edit: true, delete: true },
+  expenses: { view: true, edit: true, delete: true },
+  parts: { view: true, edit: true, delete: true },
+  partsInventory: { view: true, edit: true, delete: true },
 };
 
 const userSchema = new mongoose.Schema({

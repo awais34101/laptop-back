@@ -33,6 +33,10 @@ export function requireRole(role) {
 // Usage: requirePermission('items', 'edit')
 export function requirePermission(section, action) {
   return async (req, res, next) => {
+    // Allow admin by role
+    if (req.user && req.user.role === 'admin') {
+      return next();
+    }
     // req.user.permissions is available from JWT
     const perms = req.user && req.user.permissions;
     if (!perms || !perms[section] || !perms[section][action]) {

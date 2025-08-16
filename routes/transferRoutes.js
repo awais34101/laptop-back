@@ -1,14 +1,12 @@
 import express from 'express';
-import { getTransfers, createTransfer } from '../controllers/transferController.js';
+import { getTransfers, createTransfer, updateTransfer, deleteTransfer } from '../controllers/transferController.js';
+import auth, { requirePermission } from '../middleware/auth.js';
 
 const router = express.Router();
 
-
-import { updateTransfer, deleteTransfer } from '../controllers/transferController.js';
-
-router.get('/', getTransfers);
-router.post('/', createTransfer);
-router.put('/:id', updateTransfer);
-router.delete('/:id', deleteTransfer);
+router.get('/', auth, requirePermission('transfers', 'view'), getTransfers);
+router.post('/', auth, requirePermission('transfers', 'edit'), createTransfer);
+router.put('/:id', auth, requirePermission('transfers', 'edit'), updateTransfer);
+router.delete('/:id', auth, requirePermission('transfers', 'delete'), deleteTransfer);
 
 export default router;

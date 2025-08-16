@@ -14,4 +14,7 @@ const transferSchema = new mongoose.Schema({
   workType: { type: String, enum: ['repair', 'test'] },
 });
 
+// Indexes for faster date filtering
+transferSchema.index({ date: -1 });
+
 export default mongoose.model('Transfer', transferSchema);

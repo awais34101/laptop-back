@@ -14,4 +14,7 @@ const saleSchema = new mongoose.Schema({
   date: { type: Date, default: Date.now },
 });
 
+// Indexes for faster date filtering
+saleSchema.index({ date: -1 });
+
 export default mongoose.model('Sale', saleSchema);

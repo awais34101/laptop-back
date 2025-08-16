@@ -19,6 +19,11 @@ import technicianAssignmentRoutes from './routes/technicianAssignmentRoutes.js';
 import technicianSelfRoutes from './routes/technicianSelfRoutes.js';
 import store2Routes from './routes/store2Routes.js';
 import saleStore2Routes from './routes/saleStore2Routes.js';
+import expenseRoutes from './routes/expenseRoutes.js';
+import partRequestRoutes from './routes/partRequestRoutes.js';
+import partsInventoryRoutes from './routes/partsInventoryRoutes.js';
+import partsPurchaseRoutes from './routes/partsPurchaseRoutes.js';
+import partsUsageRoutes from './routes/partsUsageRoutes.js';
 import errorHandler from './middleware/errorHandler.js';
 
 dotenv.config();
@@ -77,6 +82,11 @@ app.use('/api/technician-stats', technicianStatsRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/technician-assignments', technicianAssignmentRoutes);
 app.use('/api/technician-self', technicianSelfRoutes);
+app.use('/api/expenses', expenseRoutes);
+app.use('/api/parts', partRequestRoutes);
+app.use('/api/parts-inventory', partsInventoryRoutes);
+app.use('/api/parts-purchases', partsPurchaseRoutes);
+app.use('/api/parts-usage', partsUsageRoutes);
 
 // ✅ Error handler
 app.use(errorHandler);

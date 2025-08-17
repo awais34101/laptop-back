@@ -91,6 +91,8 @@ router.put('/:id/edit', auth, requireRole('admin'), async (req, res) => {
   console.log('EDIT USER BODY:', req.body); // DEBUG
   const user = await User.findById(req.params.id);
   if (!user) return res.status(404).json({ error: 'User not found' });
+  const prevRole = user.role;
+  const prevPerms = JSON.stringify(user.permissions || {});
   user.role = role ?? user.role;
   user.canViewFinancials = canViewFinancials ?? user.canViewFinancials;
   if (permissions) user.permissions = permissions;
@@ -99,10 +101,15 @@ router.put('/:id/edit', auth, requireRole('admin'), async (req, res) => {
   } else {
     user.technicianId = null;
   }
+  // Invalidate existing tokens when key access changes
+  let shouldInvalidate = false;
   if (typeof isActive === 'boolean' && user.isActive !== isActive) {
     user.isActive = isActive;
-    user.passwordVersion++;
+    shouldInvalidate = true;
   }
+  if (role && role !== prevRole) shouldInvalidate = true;
+  if (permissions && JSON.stringify(permissions) !== prevPerms) shouldInvalidate = true;
+  if (shouldInvalidate) user.passwordVersion++;
   await user.save();
   console.log('UPDATED USER:', user); // DEBUG
   res.json({ message: 'User updated' });

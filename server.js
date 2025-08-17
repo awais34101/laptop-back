@@ -25,6 +25,7 @@ import partsInventoryRoutes from './routes/partsInventoryRoutes.js';
 import partsPurchaseRoutes from './routes/partsPurchaseRoutes.js';
 import partsUsageRoutes from './routes/partsUsageRoutes.js';
 import documentRoutes from './routes/documentRoutes.js';
+import timeRoutes from './routes/timeRoutes.js';
 import errorHandler from './middleware/errorHandler.js';
 
 dotenv.config();
@@ -89,6 +90,7 @@ app.use('/api/parts-inventory', partsInventoryRoutes);
 app.use('/api/parts-purchases', partsPurchaseRoutes);
 app.use('/api/parts-usage', partsUsageRoutes);
 app.use('/api/documents', documentRoutes);
+app.use('/api/time', timeRoutes);
 
 // ✅ Error handler
 app.use(errorHandler);

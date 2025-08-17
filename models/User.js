@@ -16,6 +16,8 @@ const fullPermissions = {
   expenses: { view: true, edit: true, delete: true },
   parts: { view: true, edit: true, delete: true },
   partsInventory: { view: true, edit: true, delete: true },
+  time: { view: true, edit: true, delete: true },
+  documents: { view: true, edit: true, delete: true },
 };
 
 const userSchema = new mongoose.Schema({

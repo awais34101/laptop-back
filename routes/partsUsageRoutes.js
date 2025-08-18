@@ -4,7 +4,8 @@ import { useParts, listPartsUsage, deletePartsUsage } from '../controllers/parts
 
 const router = express.Router();
 
-router.post('/', auth, requirePermission('partsInventory','edit'), useParts);
+// Allow using parts with 'view' permission so staff can record usage
+router.post('/', auth, requirePermission('partsInventory','view'), useParts);
 router.get('/', auth, requirePermission('partsInventory','view'), listPartsUsage);
 router.delete('/:id', auth, requirePermission('partsInventory','delete'), deletePartsUsage);
 

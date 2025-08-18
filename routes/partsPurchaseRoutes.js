@@ -5,7 +5,8 @@ import { listPartsPurchases, createPartsPurchase, deletePartsPurchase } from '..
 const router = express.Router();
 
 router.get('/', auth, requirePermission('partsInventory','view'), listPartsPurchases);
-router.post('/', auth, requirePermission('partsInventory','edit'), createPartsPurchase);
+// Allow creating parts purchases with 'view' permission so staff can record buys without edit rights
+router.post('/', auth, requirePermission('partsInventory','view'), createPartsPurchase);
 router.delete('/:id', auth, requirePermission('partsInventory','delete'), deletePartsPurchase);
 
 export default router;

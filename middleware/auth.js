@@ -37,6 +37,11 @@ export function requirePermission(section, action) {
     if (req.user && req.user.role === 'admin') {
       return next();
     }
+    // Allow-list: staff can perform 'view' actions on common sections even if their stored permissions are empty
+  const staffViewAllow = new Set(['partsInventory','documents','expenses','transfers']);
+    if (req.user && req.user.role === 'staff' && action === 'view' && staffViewAllow.has(section)) {
+      return next();
+    }
     // req.user.permissions is available from JWT
     const perms = req.user && req.user.permissions;
     if (!perms || !perms[section] || !perms[section][action]) {

@@ -6,7 +6,8 @@ const router = express.Router();
 
 // store param via query: ?store=store or ?store=store2
 router.get('/', auth, requirePermission('expenses', 'view'), listExpenses);
-router.post('/', auth, requirePermission('expenses', 'edit'), createExpense);
+// Allow creating expenses with 'view' permission so staff can log expenses
+router.post('/', auth, requirePermission('expenses', 'view'), createExpense);
 router.put('/:id', auth, requirePermission('expenses', 'edit'), updateExpense);
 router.delete('/:id', auth, requirePermission('expenses', 'delete'), deleteExpense);
 

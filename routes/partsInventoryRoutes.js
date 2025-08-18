@@ -6,7 +6,8 @@ const router = express.Router();
 
 // Parts master
 router.get('/parts', auth, requirePermission('partsInventory','view'), listParts);
-router.post('/parts', auth, requirePermission('partsInventory','edit'), createPart);
+// Allow creating parts with 'view' permission so staff can add master data
+router.post('/parts', auth, requirePermission('partsInventory','view'), createPart);
 router.put('/parts/:id', auth, requirePermission('partsInventory','edit'), updatePart);
 router.delete('/parts/:id', auth, requirePermission('partsInventory','delete'), deletePart);
 
@@ -14,7 +15,8 @@ router.delete('/parts/:id', auth, requirePermission('partsInventory','delete'), 
 router.get('/inventory', auth, requirePermission('partsInventory','view'), getPartsInventory);
 
 // Transfers
-router.post('/transfers', auth, requirePermission('partsInventory','edit'), transferParts);
+// Allow transferring parts with 'view' permission so staff can move stock between locations
+router.post('/transfers', auth, requirePermission('partsInventory','view'), transferParts);
 router.get('/transfers', auth, requirePermission('partsInventory','view'), listPartsTransfers);
 
 export default router;

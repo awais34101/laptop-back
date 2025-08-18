@@ -6,7 +6,8 @@ const router = express.Router();
 
 router.get('/', auth, requirePermission('documents', 'view'), listDocuments);
 router.get('/categories', auth, requirePermission('documents', 'view'), listCategories);
-router.post('/', auth, requirePermission('documents', 'edit'), createDocument);
+// Allow creating documents with 'view' permission so staff can upload
+router.post('/', auth, requirePermission('documents', 'view'), createDocument);
 router.put('/:id', auth, requirePermission('documents', 'edit'), updateDocument);
 router.delete('/:id', auth, requirePermission('documents', 'delete'), deleteDocument);
 

@@ -34,6 +34,18 @@ const userSchema = new mongoose.Schema({
     default: function() {
       // If admin, always full permissions
       if (this.role === 'admin') return fullPermissions;
+      // Provide sensible defaults for staff to allow common flows
+      if (this.role === 'staff') {
+        return {
+          dashboard: { view: true },
+          sales: { view: true },
+          partsInventory: { view: true },
+          parts: { view: true },
+          documents: { view: true },
+          expenses: { view: true },
+          transfers: { view: true },
+        };
+      }
       return {};
     }
   },

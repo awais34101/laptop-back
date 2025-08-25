@@ -4,6 +4,8 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 
 import itemRoutes from './routes/itemRoutes.js';
+import returnStoreRoutes from './routes/returnStoreRoutes.js';
+import returnStore2Routes from './routes/returnStore2Routes.js';
 import purchaseRoutes from './routes/purchaseRoutes.js';
 import warehouseRoutes from './routes/warehouseRoutes.js';
 import transferRoutes from './routes/transferRoutes.js';
@@ -69,6 +71,8 @@ app.use(express.json());
 
 // ✅ Routes
 app.use('/api/items', itemRoutes);
+app.use('/api/returns-store', returnStoreRoutes);
+app.use('/api/returns-store2', returnStore2Routes);
 app.use('/api/purchases', purchaseRoutes);
 app.use('/api/warehouse', warehouseRoutes);
 app.use('/api/transfers', transferRoutes);

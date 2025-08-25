@@ -1,5 +1,7 @@
+
 import Item from '../models/Item.js';
 import Joi from 'joi';
+import { Warehouse, Store, Store2 } from '../models/inventoryModels.js';
 
 const itemSchema = Joi.object({
   name: Joi.string().required(),
@@ -43,9 +45,27 @@ export const updateItem = async (req, res) => {
   }
 };
 
+
 export const deleteItem = async (req, res) => {
   try {
-    const item = await Item.findByIdAndDelete(req.params.id);
+    const itemId = req.params.id;
+    // Check Warehouse
+    const warehouse = await Warehouse.findOne({ item: itemId });
+    if (warehouse && warehouse.quantity > 0) {
+      return res.status(400).json({ error: 'Cannot delete item: Active inventory exists in Warehouse.' });
+    }
+    // Check Store
+    const store = await Store.findOne({ item: itemId });
+    if (store && store.remaining_quantity > 0) {
+      return res.status(400).json({ error: 'Cannot delete item: Active inventory exists in Store.' });
+    }
+    // Check Store2
+    const store2 = await Store2.findOne({ item: itemId });
+    if (store2 && store2.remaining_quantity > 0) {
+      return res.status(400).json({ error: 'Cannot delete item: Active inventory exists in Store2.' });
+    }
+    // If no active inventory, delete item
+    const item = await Item.findByIdAndDelete(itemId);
     if (!item) return res.status(404).json({ error: 'Item not found' });
     res.json({ message: 'Item deleted' });
   } catch (err) {

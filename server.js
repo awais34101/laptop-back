@@ -4,6 +4,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 
 import itemRoutes from './routes/itemRoutes.js';
+import closingRoutes from './routes/closingRoutes.js';
 import returnStoreRoutes from './routes/returnStoreRoutes.js';
 import returnStore2Routes from './routes/returnStore2Routes.js';
 import purchaseRoutes from './routes/purchaseRoutes.js';
@@ -95,6 +96,9 @@ app.use('/api/parts-purchases', partsPurchaseRoutes);
 app.use('/api/parts-usage', partsUsageRoutes);
 app.use('/api/documents', documentRoutes);
 app.use('/api/time', timeRoutes);
+
+// Closing summary route
+app.use('/api/closing', closingRoutes);
 
 // ✅ Error handler
 app.use(errorHandler);

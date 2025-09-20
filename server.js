@@ -2,6 +2,7 @@ import express from 'express';
 import mongoose from 'mongoose';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import { startAutoDeleteScheduler } from './services/autoDeleteScheduler.js';
 
 import itemRoutes from './routes/itemRoutes.js';
 import closingRoutes from './routes/closingRoutes.js';
@@ -110,6 +111,10 @@ mongoose.connect(MONGO_URI, {
 })
   .then(() => {
     console.log('✅ MongoDB connected');
+    
+    // Start the auto delete scheduler
+    startAutoDeleteScheduler();
+    
     app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
   })
   .catch((err) => {

@@ -81,6 +81,9 @@ import Item from '../models/Item.js';
 import Warehouse from '../models/Warehouse.js';
 import Store from '../models/Store.js';
 import Store2 from '../models/Store2.js';
+import SheetAssignment from '../models/SheetAssignment.js';
+import Technician from '../models/Technician.js';
+import Transfer from '../models/Transfer.js';
 import Joi from 'joi';
 
 
@@ -121,6 +124,33 @@ export const getPurchases = async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
+};
+
+// ---------------- Sheet progress helpers ----------------
+const computeSheetProgress = async (purchaseId) => {
+  const purchase = await Purchase.findById(purchaseId).populate('items.item', 'name sku');
+  if (!purchase) return null;
+  const transfers = await Transfer.find({ purchaseId }).select('items');
+  const transferredByItem = new Map();
+  for (const tr of transfers) {
+    for (const it of tr.items) {
+      const key = String(it.item);
+      transferredByItem.set(key, (transferredByItem.get(key) || 0) + (it.quantity || 0));
+    }
+  }
+  const items = purchase.items.map(it => {
+    const purchased = it.quantity || 0;
+    const transferred = transferredByItem.get(String(it.item._id || it.item)) || 0;
+    const remaining = Math.max(0, purchased - transferred);
+    return {
+      item: it.item,
+      purchased,
+      transferred,
+      remaining
+    };
+  });
+  const allRemaining = items.reduce((s, x) => s + x.remaining, 0);
+  return { purchaseId, items, isCompleted: allRemaining === 0 };
 };
 
 export const createPurchase = async (req, res) => {
@@ -178,5 +208,326 @@ export const createPurchase = async (req, res) => {
     res.status(500).json({ error: err.message });
   } finally {
     session.endSession();
+  }
+};
+
+// Get purchase sheets without price information for staff verification
+export const getPurchaseSheets = async (req, res) => {
+  try {
+    const page = Math.max(parseInt(req.query.page) || 1, 1);
+    const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 100);
+    const skip = (page - 1) * limit;
+    const search = req.query.search?.trim() || '';
+    const technicianFilter = req.query.technician?.trim() || '';
+    const statusFilter = req.query.status?.trim() || '';
+
+    // Build search filter (only by invoice number since supplier is hidden)
+    let filter = {};
+    if (search) {
+      filter = {
+        invoice_number: new RegExp(search, 'i')
+      };
+    }
+
+    const [total, purchases] = await Promise.all([
+      Purchase.countDocuments(filter),
+      Purchase.find(filter)
+        .sort({ date: -1 })
+        .skip(skip)
+        .limit(limit)
+        .populate('items.item', 'name sku')
+        .select('-items.price') // Exclude price information
+    ]);
+
+    // Get assignments for these purchases
+    const purchaseIds = purchases.map(p => p._id);
+    const assignments = await SheetAssignment.find({ 
+      purchaseId: { $in: purchaseIds } 
+    }).populate('technicianId', 'name');
+
+    // Create assignment lookup
+    const assignmentLookup = {};
+    assignments.forEach(assignment => {
+      assignmentLookup[assignment.purchaseId.toString()] = assignment;
+    });
+
+    // Filter by technician if specified
+    let filteredPurchases = purchases;
+    if (technicianFilter) {
+      const technicianAssignments = assignments.filter(a => 
+        a.technicianId && a.technicianId._id.toString() === technicianFilter
+      );
+      const assignedPurchaseIds = technicianAssignments.map(a => a.purchaseId.toString());
+      filteredPurchases = purchases.filter(p => 
+        assignedPurchaseIds.includes(p._id.toString())
+      );
+    }
+
+    // Filter by status if specified
+    if (statusFilter) {
+      if (statusFilter === 'unassigned') {
+        filteredPurchases = filteredPurchases.filter(p => 
+          !assignmentLookup[p._id.toString()]
+        );
+      } else {
+        const statusAssignments = assignments.filter(a => a.status === statusFilter);
+        const statusPurchaseIds = statusAssignments.map(a => a.purchaseId.toString());
+        filteredPurchases = filteredPurchases.filter(p => 
+          statusPurchaseIds.includes(p._id.toString())
+        );
+      }
+    }
+
+    // Transform data to remove any price fields and supplier info that might leak
+    const sheetsData = await Promise.all(filteredPurchases.map(async purchase => {
+      const assignment = assignmentLookup[purchase._id.toString()];
+      const progress = await computeSheetProgress(purchase._id);
+      return {
+        _id: purchase._id,
+        // supplier: purchase.supplier, // Hidden for security
+        invoice_number: purchase.invoice_number,
+        date: purchase.date,
+        items: purchase.items.map(item => ({
+          item: item.item,
+          quantity: item.quantity,
+          // Explicitly exclude price
+        })),
+        assignment: assignment ? {
+          _id: assignment._id,
+          technician: assignment.technicianId,
+          status: assignment.status,
+          assignedAt: assignment.assignedAt,
+          notes: assignment.notes,
+          completedAt: assignment.completedAt
+        } : null,
+        progress: progress ? progress.items : []
+      };
+    }));
+
+    res.json({
+      data: sheetsData,
+      total: filteredPurchases.length,
+      page,
+      pageSize: limit,
+      totalPages: Math.ceil(filteredPurchases.length / limit) || 1,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+// Assign a sheet to a technician
+export const assignSheet = async (req, res) => {
+  try {
+    const { purchaseId } = req.params;
+    const { technicianId, notes } = req.body;
+
+    // Validate inputs
+    if (!mongoose.Types.ObjectId.isValid(purchaseId)) {
+      return res.status(400).json({ error: 'Invalid purchase ID' });
+    }
+    if (!mongoose.Types.ObjectId.isValid(technicianId)) {
+      return res.status(400).json({ error: 'Invalid technician ID' });
+    }
+
+    // Check if purchase exists
+    const purchase = await Purchase.findById(purchaseId);
+    if (!purchase) {
+      return res.status(404).json({ error: 'Purchase not found' });
+    }
+
+    // Check if technician exists
+    const technician = await Technician.findById(technicianId);
+    if (!technician) {
+      return res.status(404).json({ error: 'Technician not found' });
+    }
+
+    // Check if already assigned
+    const existingAssignment = await SheetAssignment.findOne({ purchaseId });
+    if (existingAssignment) {
+      // Update existing assignment
+      existingAssignment.technicianId = technicianId;
+      existingAssignment.assignedBy = req.user.userId;
+      existingAssignment.assignedAt = new Date();
+      existingAssignment.status = 'assigned';
+      existingAssignment.notes = notes || '';
+      existingAssignment.completedAt = null;
+      await existingAssignment.save();
+
+      await existingAssignment.populate('technicianId', 'name');
+      res.json(existingAssignment);
+    } else {
+      // Create new assignment
+      const assignment = new SheetAssignment({
+        purchaseId,
+        technicianId,
+        assignedBy: req.user.userId,
+        notes: notes || ''
+      });
+
+      await assignment.save();
+      await assignment.populate('technicianId', 'name');
+      res.status(201).json(assignment);
+    }
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+// Update sheet assignment status
+export const updateSheetStatus = async (req, res) => {
+  try {
+    const { assignmentId } = req.params;
+    const { status, notes } = req.body;
+
+    if (!mongoose.Types.ObjectId.isValid(assignmentId)) {
+      return res.status(400).json({ error: 'Invalid assignment ID' });
+    }
+
+    const validStatuses = ['assigned', 'in-progress', 'completed'];
+    if (!validStatuses.includes(status)) {
+      return res.status(400).json({ error: 'Invalid status' });
+    }
+
+    const assignment = await SheetAssignment.findById(assignmentId);
+    if (!assignment) {
+      return res.status(404).json({ error: 'Assignment not found' });
+    }
+
+    assignment.status = status;
+    if (notes !== undefined) assignment.notes = notes;
+    if (status === 'completed') {
+      assignment.completedAt = new Date();
+    } else {
+      assignment.completedAt = null;
+    }
+
+    await assignment.save();
+    await assignment.populate('technicianId', 'name');
+    res.json(assignment);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+// Create a transfer tied to a sheet (Warehouse -> Store or Store2)
+export const createSheetTransfer = async (req, res) => {
+  const session = await mongoose.startSession();
+  try {
+    const { purchaseId } = req.params;
+    const { destination, items, notes } = req.body; // destination: 'store' | 'store2'
+
+    if (!['store', 'store2'].includes(destination)) {
+      return res.status(400).json({ error: 'Destination must be store or store2' });
+    }
+    if (!mongoose.Types.ObjectId.isValid(purchaseId)) {
+      return res.status(400).json({ error: 'Invalid purchase ID' });
+    }
+
+    const purchase = await Purchase.findById(purchaseId);
+    if (!purchase) return res.status(404).json({ error: 'Purchase not found' });
+
+    const assignment = await SheetAssignment.findOne({ purchaseId });
+    const technicianId = assignment ? assignment.technicianId : undefined;
+
+    // Build purchased quantities map
+    const purchasedMap = new Map();
+    for (const it of purchase.items) purchasedMap.set(String(it.item), it.quantity);
+
+    // Current transferred per item
+    const progress = await computeSheetProgress(purchaseId);
+    const transferredMap = new Map();
+    if (progress) for (const it of progress.items) transferredMap.set(String(it.item._id || it.item), it.transferred);
+
+    // Validate requested quantities
+    for (const row of items) {
+      const itemId = String(row.item);
+      const purchasedQty = purchasedMap.get(itemId) || 0;
+      const transferredQty = transferredMap.get(itemId) || 0;
+      const remaining = Math.max(0, purchasedQty - transferredQty);
+      if (row.quantity <= 0) return res.status(400).json({ error: 'Quantity must be > 0' });
+      if (row.quantity > remaining) {
+        return res.status(400).json({ error: `Over-transfer for item ${itemId}. Remaining: ${remaining}` });
+      }
+    }
+
+    // Check warehouse stock
+    for (const row of items) {
+      const wh = await Warehouse.findOne({ item: row.item });
+      const whQty = wh ? wh.quantity : 0;
+      if (!wh || whQty < row.quantity) {
+        return res.status(400).json({ error: 'Not enough stock in warehouse' });
+      }
+    }
+
+    await session.withTransaction(async () => {
+      // Move inventory
+      for (const row of items) {
+        const wh = await Warehouse.findOne({ item: row.item }).session(session);
+        wh.quantity -= row.quantity;
+        await wh.save({ session });
+
+        if (destination === 'store') {
+          const st = await Store.findOne({ item: row.item }).session(session);
+          if (st) { st.remaining_quantity += row.quantity; await st.save({ session }); }
+          else { await Store.create([{ item: row.item, remaining_quantity: row.quantity }], { session }); }
+        } else {
+          const st2 = await Store2.findOne({ item: row.item }).session(session);
+          if (st2) { st2.remaining_quantity += row.quantity; await st2.save({ session }); }
+          else { await Store2.create([{ item: row.item, remaining_quantity: row.quantity }], { session }); }
+        }
+      }
+
+      // Record transfer entry with linkage to the sheet
+      const transfer = new Transfer({
+        items,
+        from: 'warehouse',
+        to: destination,
+        technician: technicianId,
+        workType: undefined,
+        purchaseId,
+        assignmentId: assignment?._id,
+      });
+      await transfer.save({ session });
+
+      // Optional: auto-complete if fully transferred
+      const newProgress = await computeSheetProgress(purchaseId);
+      if (assignment && newProgress?.isCompleted) {
+        assignment.status = 'completed';
+        assignment.completedAt = new Date();
+        await assignment.save({ session });
+      }
+    });
+
+    res.status(201).json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  } finally {
+    session.endSession();
+  }
+};
+
+// Public API: get per-sheet progress
+export const getSheetProgress = async (req, res) => {
+  try {
+    const { purchaseId } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(purchaseId)) {
+      return res.status(400).json({ error: 'Invalid purchase ID' });
+    }
+    const progress = await computeSheetProgress(purchaseId);
+    if (!progress) return res.status(404).json({ error: 'Purchase not found' });
+    res.json(progress);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+// Get all technicians for assignment dropdown
+export const getTechnicians = async (req, res) => {
+  try {
+    const technicians = await Technician.find({}, 'name email specialization').sort({ name: 1 });
+    res.json(technicians);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 };

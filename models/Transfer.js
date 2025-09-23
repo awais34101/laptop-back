@@ -12,9 +12,13 @@ const transferSchema = new mongoose.Schema({
   date: { type: Date, default: Date.now },
   technician: { type: mongoose.Schema.Types.ObjectId, ref: 'Technician' },
   workType: { type: String, enum: ['repair', 'test'] },
+  // Optional links to a purchase sheet assignment for per-sheet tracking
+  purchaseId: { type: mongoose.Schema.Types.ObjectId, ref: 'Purchase' },
+  assignmentId: { type: mongoose.Schema.Types.ObjectId, ref: 'SheetAssignment' },
 });
 
 // Indexes for faster date filtering
 transferSchema.index({ date: -1 });
+transferSchema.index({ purchaseId: 1 });
 
 export default mongoose.model('Transfer', transferSchema);

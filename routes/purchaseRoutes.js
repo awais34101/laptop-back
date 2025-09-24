@@ -12,7 +12,7 @@ router.get('/:purchaseId/progress', auth, requirePermission('purchaseSheets', 'v
 router.get('/technicians', auth, requirePermission('technicians', 'view'), getTechnicians);
 router.post('/', auth, requirePermission('purchases', 'edit'), createPurchase);
 router.post('/:purchaseId/assign', auth, requirePermission('purchases', 'edit'), assignSheet);
-router.post('/:purchaseId/transfers', auth, requirePermission('purchases', 'edit'), createSheetTransfer);
+router.post('/:purchaseId/transfers', auth, requirePermission('transfers', 'add'), createSheetTransfer);
 router.put('/:id', auth, requirePermission('purchases', 'edit'), updatePurchase);
 router.put('/assignments/:assignmentId/status', auth, requirePermission('purchases', 'edit'), updateSheetStatus);
 router.delete('/:id', auth, requirePermission('purchases', 'delete'), deletePurchase);

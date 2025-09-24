@@ -7,9 +7,9 @@ const router = express.Router();
 
 
 router.get('/', auth, requirePermission('purchases', 'view'), getPurchases);
-router.get('/sheets', auth, requirePermission('purchases', 'view'), getPurchaseSheets);
-router.get('/:purchaseId/progress', auth, requirePermission('purchases', 'view'), getSheetProgress);
-router.get('/technicians', auth, requirePermission('purchases', 'view'), getTechnicians);
+router.get('/sheets', auth, requirePermission('purchaseSheets', 'view'), getPurchaseSheets);
+router.get('/:purchaseId/progress', auth, requirePermission('purchaseSheets', 'view'), getSheetProgress);
+router.get('/technicians', auth, requirePermission('technicians', 'view'), getTechnicians);
 router.post('/', auth, requirePermission('purchases', 'edit'), createPurchase);
 router.post('/:purchaseId/assign', auth, requirePermission('purchases', 'edit'), assignSheet);
 router.post('/:purchaseId/transfers', auth, requirePermission('purchases', 'edit'), createSheetTransfer);

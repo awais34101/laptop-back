@@ -4,9 +4,9 @@ import auth, { requirePermission } from '../middleware/auth.js';
 
 const router = express.Router();
 
-router.get('/', auth, requirePermission('sales', 'view'), getSalesStore2);
-router.get('/total', auth, requirePermission('sales', 'view'), getSalesStore2Total);
-router.post('/', auth, requirePermission('sales', 'view'), createSaleStore2);
-router.delete('/:id', auth, requirePermission('sales', 'delete'), deleteSaleStore2);
+router.get('/', auth, requirePermission('salesStore2', 'view'), getSalesStore2);
+router.get('/total', auth, requirePermission('salesStore2', 'view'), getSalesStore2Total);
+router.post('/', auth, requirePermission('salesStore2', 'add'), createSaleStore2);
+router.delete('/:id', auth, requirePermission('salesStore2', 'delete'), deleteSaleStore2);
 
 export default router;

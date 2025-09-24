@@ -77,6 +77,10 @@ const ROLE_PERMISSIONS = {
     transfers: { view: true },
     store: { view: true, add: true, edit: true },
     store2: { view: true, add: true, edit: true },
+    purchases: { view: true },
+    purchaseSheets: { view: true },
+    technicians: { view: true },
+    warehouse: { view: true },
   },
   technician: {
     dashboard: { view: true },
@@ -227,24 +231,16 @@ userSchema.methods.getEffectivePermissions = function() {
     return FULL_PERMISSIONS;
   }
   
-  // Merge role-based permissions with custom permissions
-  const rolePermissions = ROLE_PERMISSIONS[this.role] || {};
   const customPermissions = this.permissions || {};
   
-  // Custom permissions can only add to or restrict role permissions, not exceed them
-  const effectivePermissions = {};
-  
-  for (const [section, roleActions] of Object.entries(rolePermissions)) {
-    effectivePermissions[section] = {};
-    for (const [action, allowed] of Object.entries(roleActions)) {
-      // If role allows it, check if custom permissions override it
-      if (allowed) {
-        effectivePermissions[section][action] = customPermissions[section]?.[action] !== false;
-      }
-    }
+  // If user has custom permissions defined, use those exclusively
+  // This allows for truly custom permission sets that override role defaults
+  if (Object.keys(customPermissions).length > 0) {
+    return customPermissions;
   }
   
-  return effectivePermissions;
+  // Otherwise, fall back to role-based permissions
+  return ROLE_PERMISSIONS[this.role] || {};
 };
 
 userSchema.methods.hasPermission = function(section, action) {

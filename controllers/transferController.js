@@ -2,6 +2,7 @@ import Transfer from '../models/Transfer.js';
 import Warehouse from '../models/Warehouse.js';
 import Store from '../models/Store.js';
 import Store2 from '../models/Store2.js';
+import mongoose from 'mongoose';
 import Joi from 'joi';
 
 const transferSchema = Joi.object({
@@ -50,134 +51,175 @@ const getModel = (loc) => (loc === 'warehouse' ? Warehouse : loc === 'store' ? S
 const getQtyField = (loc) => (loc === 'warehouse' ? 'quantity' : 'remaining_quantity');
 
 export const createTransfer = async (req, res) => {
+  const session = await mongoose.startSession();
   try {
     const { error } = transferSchema.validate(req.body);
     if (error) return res.status(400).json({ error: error.details[0].message });
     const { items, from, to, technician, workType } = req.body;
     if (from === to) return res.status(400).json({ error: 'Source and destination must be different' });
 
-    // Check stock and update for each item
-    for (const { item, quantity } of items) {
-      const FromModel = getModel(from);
-      const ToModel = getModel(to);
-  let fromDoc = await FromModel.findOne({ item });
-  let toDoc = await ToModel.findOne({ item });
-  const fromQty = fromDoc ? (from === 'warehouse' ? fromDoc.quantity : fromDoc.remaining_quantity) : 0;
-  if (!fromDoc || fromQty < quantity) {
-        return res.status(400).json({ error: `Not enough stock in ${from}` });
+    let transfer;
+
+    await session.withTransaction(async () => {
+      // STEP 1: Check ALL items have sufficient stock BEFORE making any changes
+      const stockChecks = [];
+      for (const { item, quantity } of items) {
+        const FromModel = getModel(from);
+        const fromDoc = await FromModel.findOne({ item }).session(session);
+        const fromQty = fromDoc ? (from === 'warehouse' ? fromDoc.quantity : fromDoc.remaining_quantity) : 0;
+        
+        if (!fromDoc || fromQty < quantity) {
+          throw new Error(`Not enough stock in ${from} for item ${item}. Available: ${fromQty}, Required: ${quantity}`);
+        }
+        
+        stockChecks.push({ fromDoc, item, quantity });
       }
-      // Deduct from source
-      if (from === 'warehouse') {
-        fromDoc.quantity -= quantity;
-      } else {
-        fromDoc.remaining_quantity -= quantity;
-      }
-      await fromDoc.save();
-      // Add to destination
-      if (toDoc) {
-        if (to === 'warehouse') {
-          toDoc.quantity += quantity;
+
+      // STEP 2: If all checks pass, perform ALL transfers
+      for (const { fromDoc, item, quantity } of stockChecks) {
+        const ToModel = getModel(to);
+        let toDoc = await ToModel.findOne({ item }).session(session);
+
+        // Deduct from source
+        if (from === 'warehouse') {
+          fromDoc.quantity -= quantity;
         } else {
-          toDoc.remaining_quantity += quantity;
+          fromDoc.remaining_quantity -= quantity;
         }
-        await toDoc.save();
-      } else {
-        if (to === 'warehouse') {
-          await Warehouse.create({ item, quantity });
-        } else if (to === 'store') {
-          await Store.create({ item, remaining_quantity: quantity });
-        } else if (to === 'store2') {
-          await Store2.create({ item, remaining_quantity: quantity });
+        await fromDoc.save({ session });
+
+        // Add to destination
+        if (toDoc) {
+          if (to === 'warehouse') {
+            toDoc.quantity += quantity;
+          } else {
+            toDoc.remaining_quantity += quantity;
+          }
+          await toDoc.save({ session });
+        } else {
+          if (to === 'warehouse') {
+            await Warehouse.create([{ item, quantity }], { session });
+          } else if (to === 'store') {
+            await Store.create([{ item, remaining_quantity: quantity }], { session });
+          } else if (to === 'store2') {
+            await Store2.create([{ item, remaining_quantity: quantity }], { session });
+          }
         }
       }
-    }
-    const transfer = new Transfer({ items, from, to, technician, workType });
-    await transfer.save();
+
+      // STEP 3: Save the transfer record
+      transfer = new Transfer({ items, from, to, technician, workType });
+      await transfer.save({ session });
+    });
+
     res.status(201).json(transfer);
   } catch (err) {
     res.status(500).json({ error: err.message });
+  } finally {
+    session.endSession();
   }
 };
 
 // Update transfer
 export const updateTransfer = async (req, res) => {
+  const session = await mongoose.startSession();
   try {
     const { error } = transferSchema.validate(req.body);
     if (error) return res.status(400).json({ error: error.details[0].message });
     const { items, from, to, technician, workType } = req.body;
-    const transfer = await Transfer.findById(req.params.id);
+    const transfer = await Transfer.findById(req.params.id).session(session);
     if (!transfer) return res.status(404).json({ error: 'Transfer not found' });
-    // 1) Revert previous inventory effects
-    for (const prev of transfer.items) {
-      const FromModelPrev = getModel(transfer.from);
-      const ToModelPrev = getModel(transfer.to);
-      const fromFieldPrev = getQtyField(transfer.from);
-      const toFieldPrev = getQtyField(transfer.to);
 
-      let fromDocPrev = await FromModelPrev.findOne({ item: prev.item });
-      let toDocPrev = await ToModelPrev.findOne({ item: prev.item });
+    let updatedTransfer;
 
-      // Add back to source
-      if (fromDocPrev) {
-        fromDocPrev[fromFieldPrev] = (fromDocPrev[fromFieldPrev] || 0) + prev.quantity;
-        await fromDocPrev.save();
-      } else {
-        // If missing, create with reverted qty
-        const payload = { item: prev.item };
-        payload[fromFieldPrev] = prev.quantity;
-        await getModel(transfer.from).create(payload);
-      }
-      // Subtract from destination
-      if (toDocPrev) {
-        toDocPrev[toFieldPrev] = Math.max(0, (toDocPrev[toFieldPrev] || 0) - prev.quantity);
-        await toDocPrev.save();
-      }
-    }
+    await session.withTransaction(async () => {
+      // 1) Revert previous inventory effects
+      for (const prev of transfer.items) {
+        const FromModelPrev = getModel(transfer.from);
+        const ToModelPrev = getModel(transfer.to);
+        const fromFieldPrev = getQtyField(transfer.from);
+        const toFieldPrev = getQtyField(transfer.to);
 
-    // 2) Apply new transfer (same as create)
-    for (const { item, quantity } of items) {
-      const FromModel = getModel(from);
-      const ToModel = getModel(to);
-      let fromDoc = await FromModel.findOne({ item });
-      let toDoc = await ToModel.findOne({ item });
-      const fromQty = fromDoc ? (from === 'warehouse' ? fromDoc.quantity : fromDoc.remaining_quantity) : 0;
-      if (!fromDoc || fromQty < quantity) {
-        return res.status(400).json({ error: `Not enough stock in ${from}` });
-      }
-      if (from === 'warehouse') {
-        fromDoc.quantity -= quantity;
-      } else {
-        fromDoc.remaining_quantity -= quantity;
-      }
-      await fromDoc.save();
-      if (toDoc) {
-        if (to === 'warehouse') {
-          toDoc.quantity += quantity;
+        let fromDocPrev = await FromModelPrev.findOne({ item: prev.item }).session(session);
+        let toDocPrev = await ToModelPrev.findOne({ item: prev.item }).session(session);
+
+        // Add back to source
+        if (fromDocPrev) {
+          fromDocPrev[fromFieldPrev] = (fromDocPrev[fromFieldPrev] || 0) + prev.quantity;
+          await fromDocPrev.save({ session });
         } else {
-          toDoc.remaining_quantity += quantity;
+          // If missing, create with reverted qty
+          const payload = { item: prev.item };
+          payload[fromFieldPrev] = prev.quantity;
+          await getModel(transfer.from).create([payload], { session });
         }
-        await toDoc.save();
-      } else {
-        if (to === 'warehouse') {
-          await Warehouse.create({ item, quantity });
-        } else if (to === 'store') {
-          await Store.create({ item, remaining_quantity: quantity });
-        } else if (to === 'store2') {
-          await Store2.create({ item, remaining_quantity: quantity });
+        // Subtract from destination
+        if (toDocPrev) {
+          toDocPrev[toFieldPrev] = Math.max(0, (toDocPrev[toFieldPrev] || 0) - prev.quantity);
+          await toDocPrev.save({ session });
         }
       }
-    }
 
-    // 3) Save updated transfer
-    transfer.items = items;
-    transfer.from = from;
-    transfer.to = to;
-    transfer.technician = technician;
-    transfer.workType = workType;
-    await transfer.save();
-    res.json(transfer);
+      // 2) Check ALL new items have sufficient stock BEFORE making any changes
+      const stockChecks = [];
+      for (const { item, quantity } of items) {
+        const FromModel = getModel(from);
+        const fromDoc = await FromModel.findOne({ item }).session(session);
+        const fromQty = fromDoc ? (from === 'warehouse' ? fromDoc.quantity : fromDoc.remaining_quantity) : 0;
+        
+        if (!fromDoc || fromQty < quantity) {
+          throw new Error(`Not enough stock in ${from} for item ${item}. Available: ${fromQty}, Required: ${quantity}`);
+        }
+        
+        stockChecks.push({ fromDoc, item, quantity });
+      }
+
+      // 3) Apply new transfer
+      for (const { fromDoc, item, quantity } of stockChecks) {
+        const ToModel = getModel(to);
+        let toDoc = await ToModel.findOne({ item }).session(session);
+
+        // Deduct from source
+        if (from === 'warehouse') {
+          fromDoc.quantity -= quantity;
+        } else {
+          fromDoc.remaining_quantity -= quantity;
+        }
+        await fromDoc.save({ session });
+
+        // Add to destination
+        if (toDoc) {
+          if (to === 'warehouse') {
+            toDoc.quantity += quantity;
+          } else {
+            toDoc.remaining_quantity += quantity;
+          }
+          await toDoc.save({ session });
+        } else {
+          if (to === 'warehouse') {
+            await Warehouse.create([{ item, quantity }], { session });
+          } else if (to === 'store') {
+            await Store.create([{ item, remaining_quantity: quantity }], { session });
+          } else if (to === 'store2') {
+            await Store2.create([{ item, remaining_quantity: quantity }], { session });
+          }
+        }
+      }
+
+      // 4) Update transfer record
+      transfer.items = items;
+      transfer.from = from;
+      transfer.to = to;
+      transfer.technician = technician;
+      transfer.workType = workType;
+      updatedTransfer = await transfer.save({ session });
+    });
+
+    res.json(updatedTransfer);
   } catch (err) {
     res.status(500).json({ error: err.message });
+  } finally {
+    session.endSession();
   }
 };
 

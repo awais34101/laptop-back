@@ -138,19 +138,40 @@ const computeSheetProgress = async (purchaseId) => {
       transferredByItem.set(key, (transferredByItem.get(key) || 0) + (it.quantity || 0));
     }
   }
+  
+  let totalPurchased = 0;
+  let totalTransferred = 0;
+  
   const items = purchase.items.map(it => {
     const purchased = it.quantity || 0;
     const transferred = transferredByItem.get(String(it.item._id || it.item)) || 0;
     const remaining = Math.max(0, purchased - transferred);
+    const transferPercentage = purchased > 0 ? Math.round((transferred / purchased) * 100) : 0;
+    
+    totalPurchased += purchased;
+    totalTransferred += transferred;
+    
     return {
       item: it.item,
       purchased,
       transferred,
-      remaining
+      remaining,
+      transferPercentage
     };
   });
+  
   const allRemaining = items.reduce((s, x) => s + x.remaining, 0);
-  return { purchaseId, items, isCompleted: allRemaining === 0 };
+  const overallTransferPercentage = totalPurchased > 0 ? Math.round((totalTransferred / totalPurchased) * 100) : 0;
+  
+  return { 
+    purchaseId, 
+    items, 
+    isCompleted: allRemaining === 0,
+    totalPurchased,
+    totalTransferred,
+    totalRemaining: allRemaining,
+    overallTransferPercentage
+  };
 };
 
 export const createPurchase = async (req, res) => {
@@ -300,7 +321,11 @@ export const getPurchaseSheets = async (req, res) => {
           notes: assignment.notes,
           completedAt: assignment.completedAt
         } : null,
-        progress: progress ? progress.items : []
+        progress: progress ? progress.items : [],
+        transferPercentage: progress ? progress.overallTransferPercentage : 0,
+        totalPurchased: progress ? progress.totalPurchased : 0,
+        totalTransferred: progress ? progress.totalTransferred : 0,
+        totalRemaining: progress ? progress.totalRemaining : 0
       };
     }));
 

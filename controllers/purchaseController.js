@@ -242,99 +242,129 @@ export const getPurchaseSheets = async (req, res) => {
     const technicianFilter = req.query.technician?.trim() || '';
     const statusFilter = req.query.status?.trim() || '';
 
-    // Build search filter (only by invoice number since supplier is hidden)
-    let filter = {};
-    if (search) {
-      filter = {
-        invoice_number: new RegExp(search, 'i')
-      };
+    // Base filter: search only by invoice number (supplier hidden)
+    const baseFilter = search ? { invoice_number: new RegExp(search, 'i') } : {};
+
+    // If no technician/status filter, we can paginate directly on purchases
+    if (!technicianFilter && !statusFilter) {
+      const [total, purchases] = await Promise.all([
+        Purchase.countDocuments(baseFilter),
+        Purchase.find(baseFilter)
+          .sort({ date: -1 })
+          .skip(skip)
+          .limit(limit)
+          .populate('items.item', 'name sku')
+          .select('-items.price')
+      ]);
+
+      const purchaseIds = purchases.map(p => p._id);
+      const assignments = await SheetAssignment.find({ purchaseId: { $in: purchaseIds } })
+        .populate('technicianId', 'name');
+      const assignmentLookup = {};
+      for (const a of assignments) assignmentLookup[a.purchaseId.toString()] = a;
+
+      const sheetsData = await Promise.all(purchases.map(async (purchase) => {
+        const assignment = assignmentLookup[purchase._id.toString()];
+        const progress = await computeSheetProgress(purchase._id);
+        return {
+          _id: purchase._id,
+          invoice_number: purchase.invoice_number,
+          date: purchase.date,
+          items: purchase.items.map(item => ({ item: item.item, quantity: item.quantity })),
+          assignment: assignment ? {
+            _id: assignment._id,
+            technician: assignment.technicianId,
+            status: assignment.status,
+            assignedAt: assignment.assignedAt,
+            notes: assignment.notes,
+            completedAt: assignment.completedAt,
+          } : null,
+          progress: progress ? progress.items : [],
+          transferPercentage: progress ? progress.overallTransferPercentage : 0,
+          totalPurchased: progress ? progress.totalPurchased : 0,
+          totalTransferred: progress ? progress.totalTransferred : 0,
+          totalRemaining: progress ? progress.totalRemaining : 0,
+        };
+      }));
+
+      return res.json({
+        data: sheetsData,
+        total,
+        page,
+        pageSize: limit,
+        totalPages: Math.ceil(total / limit) || 1,
+      });
     }
 
-    const [total, purchases] = await Promise.all([
-      Purchase.countDocuments(filter),
-      Purchase.find(filter)
-        .sort({ date: -1 })
-        .skip(skip)
-        .limit(limit)
-        .populate('items.item', 'name sku')
-        .select('-items.price') // Exclude price information
-    ]);
+    // When technician/status filters are applied, determine matching purchase IDs first,
+    // then paginate those IDs to ensure accurate counts and pages.
+    const baseIdsOrdered = (await Purchase.find(baseFilter).sort({ date: -1 }).select('_id').lean())
+      .map(d => d._id.toString());
 
-    // Get assignments for these purchases
-    const purchaseIds = purchases.map(p => p._id);
-    const assignments = await SheetAssignment.find({ 
-      purchaseId: { $in: purchaseIds } 
-    }).populate('technicianId', 'name');
+    let matchedIdsSet = new Set(baseIdsOrdered);
 
-    // Create assignment lookup
+    // If status is 'unassigned', exclude any purchases that have an assignment
+    if (statusFilter === 'unassigned') {
+      const assigned = await SheetAssignment.find({ purchaseId: { $in: Array.from(matchedIdsSet) } })
+        .select('purchaseId').lean();
+      const assignedSet = new Set(assigned.map(a => a.purchaseId.toString()));
+      matchedIdsSet = new Set(baseIdsOrdered.filter(id => !assignedSet.has(id)));
+    } else {
+      // Build assignment query within the base set
+      const aQuery = { purchaseId: { $in: baseIdsOrdered } };
+      if (technicianFilter) aQuery.technicianId = technicianFilter;
+      if (statusFilter) aQuery.status = statusFilter;
+      const matches = await SheetAssignment.find(aQuery).select('purchaseId').lean();
+      matchedIdsSet = new Set(matches.map(m => m.purchaseId.toString()));
+    }
+
+    const matchedIdsOrdered = baseIdsOrdered.filter(id => matchedIdsSet.has(id));
+    const total = matchedIdsOrdered.length;
+    const pageIds = matchedIdsOrdered.slice(skip, skip + limit);
+
+    const purchases = await Purchase.find({ _id: { $in: pageIds } })
+      .populate('items.item', 'name sku')
+      .select('-items.price')
+      .lean();
+
+    // Keep the original order by date
+    purchases.sort((a, b) => pageIds.indexOf(a._id.toString()) - pageIds.indexOf(b._id.toString()));
+
+    const assignments = await SheetAssignment.find({ purchaseId: { $in: pageIds } })
+      .populate('technicianId', 'name');
     const assignmentLookup = {};
-    assignments.forEach(assignment => {
-      assignmentLookup[assignment.purchaseId.toString()] = assignment;
-    });
+    for (const a of assignments) assignmentLookup[a.purchaseId.toString()] = a;
 
-    // Filter by technician if specified
-    let filteredPurchases = purchases;
-    if (technicianFilter) {
-      const technicianAssignments = assignments.filter(a => 
-        a.technicianId && a.technicianId._id.toString() === technicianFilter
-      );
-      const assignedPurchaseIds = technicianAssignments.map(a => a.purchaseId.toString());
-      filteredPurchases = purchases.filter(p => 
-        assignedPurchaseIds.includes(p._id.toString())
-      );
-    }
-
-    // Filter by status if specified
-    if (statusFilter) {
-      if (statusFilter === 'unassigned') {
-        filteredPurchases = filteredPurchases.filter(p => 
-          !assignmentLookup[p._id.toString()]
-        );
-      } else {
-        const statusAssignments = assignments.filter(a => a.status === statusFilter);
-        const statusPurchaseIds = statusAssignments.map(a => a.purchaseId.toString());
-        filteredPurchases = filteredPurchases.filter(p => 
-          statusPurchaseIds.includes(p._id.toString())
-        );
-      }
-    }
-
-    // Transform data to remove any price fields and supplier info that might leak
-    const sheetsData = await Promise.all(filteredPurchases.map(async purchase => {
+    const sheetsData = await Promise.all(purchases.map(async (purchase) => {
       const assignment = assignmentLookup[purchase._id.toString()];
       const progress = await computeSheetProgress(purchase._id);
       return {
         _id: purchase._id,
-        // supplier: purchase.supplier, // Hidden for security
         invoice_number: purchase.invoice_number,
         date: purchase.date,
-        items: purchase.items.map(item => ({
-          item: item.item,
-          quantity: item.quantity,
-          // Explicitly exclude price
-        })),
+        items: purchase.items.map(item => ({ item: item.item, quantity: item.quantity })),
         assignment: assignment ? {
           _id: assignment._id,
           technician: assignment.technicianId,
           status: assignment.status,
           assignedAt: assignment.assignedAt,
           notes: assignment.notes,
-          completedAt: assignment.completedAt
+          completedAt: assignment.completedAt,
         } : null,
         progress: progress ? progress.items : [],
         transferPercentage: progress ? progress.overallTransferPercentage : 0,
         totalPurchased: progress ? progress.totalPurchased : 0,
         totalTransferred: progress ? progress.totalTransferred : 0,
-        totalRemaining: progress ? progress.totalRemaining : 0
+        totalRemaining: progress ? progress.totalRemaining : 0,
       };
     }));
 
-    res.json({
+    return res.json({
       data: sheetsData,
-      total: filteredPurchases.length,
+      total,
       page,
       pageSize: limit,
-      totalPages: Math.ceil(filteredPurchases.length / limit) || 1,
+      totalPages: Math.ceil(total / limit) || 1,
     });
   } catch (err) {
     res.status(500).json({ error: err.message });

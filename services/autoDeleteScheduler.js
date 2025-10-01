@@ -4,11 +4,13 @@ import Sale from '../models/Sale.js';
 import SaleStore2 from '../models/SaleStore2.js';
 import Purchase from '../models/Purchase.js';
 import Transfer from '../models/Transfer.js';
+import { DUBAI_TZ, getDubaiStartOfDayCutoffDaysAgo, formatDubai } from '../utils/dateUtils.js';
 
 // Run auto delete every day at 2:00 AM
 export const startAutoDeleteScheduler = () => {
   console.log('Starting auto delete scheduler...');
   
+  // Run at 02:00 Dubai local time daily
   cron.schedule('0 2 * * *', async () => {
     try {
       console.log('Running scheduled auto delete...');
@@ -27,30 +29,43 @@ export const startAutoDeleteScheduler = () => {
         transfers: 0
       };
 
+      // Precompute cutoffs at Dubai start-of-day to avoid partial-day early deletions
+      const salesCutoff = settings.auto_delete_sales_days > 0
+        ? getDubaiStartOfDayCutoffDaysAgo(settings.auto_delete_sales_days, now)
+        : null;
+      const purchaseCutoff = settings.auto_delete_purchase_days > 0
+        ? getDubaiStartOfDayCutoffDaysAgo(settings.auto_delete_purchase_days, now)
+        : null;
+      const transferCutoff = settings.auto_delete_transfer_days > 0
+        ? getDubaiStartOfDayCutoffDaysAgo(settings.auto_delete_transfer_days, now)
+        : null;
+
+      console.log('Auto-delete cutoffs (UTC/Dubai):', {
+        sales: salesCutoff ? { utc: salesCutoff.toISOString(), dubai: formatDubai(salesCutoff) } : null,
+        purchases: purchaseCutoff ? { utc: purchaseCutoff.toISOString(), dubai: formatDubai(purchaseCutoff) } : null,
+        transfers: transferCutoff ? { utc: transferCutoff.toISOString(), dubai: formatDubai(transferCutoff) } : null,
+      });
+
       // Delete old sales (Store 1)
-      if (settings.auto_delete_sales_days > 0) {
-        const salesCutoff = new Date(now.getTime() - (settings.auto_delete_sales_days * 24 * 60 * 60 * 1000));
+      if (salesCutoff) {
         const deletedSales = await Sale.deleteMany({ date: { $lt: salesCutoff } });
         deletedCounts.sales = deletedSales.deletedCount;
       }
 
       // Delete old sales (Store 2)
-      if (settings.auto_delete_sales_days > 0) {
-        const salesCutoff = new Date(now.getTime() - (settings.auto_delete_sales_days * 24 * 60 * 60 * 1000));
+      if (salesCutoff) {
         const deletedSalesStore2 = await SaleStore2.deleteMany({ date: { $lt: salesCutoff } });
         deletedCounts.salesStore2 = deletedSalesStore2.deletedCount;
       }
 
       // Delete old purchases
-      if (settings.auto_delete_purchase_days > 0) {
-        const purchaseCutoff = new Date(now.getTime() - (settings.auto_delete_purchase_days * 24 * 60 * 60 * 1000));
+      if (purchaseCutoff) {
         const deletedPurchases = await Purchase.deleteMany({ date: { $lt: purchaseCutoff } });
         deletedCounts.purchases = deletedPurchases.deletedCount;
       }
 
       // Delete old transfers
-      if (settings.auto_delete_transfer_days > 0) {
-        const transferCutoff = new Date(now.getTime() - (settings.auto_delete_transfer_days * 24 * 60 * 60 * 1000));
+      if (transferCutoff) {
         const deletedTransfers = await Transfer.deleteMany({ date: { $lt: transferCutoff } });
         deletedCounts.transfers = deletedTransfers.deletedCount;
       }
@@ -60,7 +75,7 @@ export const startAutoDeleteScheduler = () => {
     } catch (error) {
       console.error('Scheduled auto delete failed:', error);
     }
-  });
+  }, { timezone: DUBAI_TZ });
 };
 
 // Function to stop the scheduler (if needed)

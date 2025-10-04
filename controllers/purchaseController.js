@@ -276,6 +276,7 @@ export const getPurchaseSheets = async (req, res) => {
             technician: assignment.technicianId,
             status: assignment.status,
             assignedAt: assignment.assignedAt,
+            dueDate: assignment.dueDate,
             notes: assignment.notes,
             completedAt: assignment.completedAt,
           } : null,
@@ -348,6 +349,7 @@ export const getPurchaseSheets = async (req, res) => {
           technician: assignment.technicianId,
           status: assignment.status,
           assignedAt: assignment.assignedAt,
+          dueDate: assignment.dueDate,
           notes: assignment.notes,
           completedAt: assignment.completedAt,
         } : null,
@@ -375,7 +377,13 @@ export const getPurchaseSheets = async (req, res) => {
 export const assignSheet = async (req, res) => {
   try {
     const { purchaseId } = req.params;
-    const { technicianId, notes } = req.body;
+    const { technicianId, notes, dueDate } = req.body;
+
+    console.log('=== BACKEND ASSIGNMENT DEBUG ===');
+    console.log('Request body:', req.body);
+    console.log('dueDate received:', dueDate);
+    console.log('dueDate type:', typeof dueDate);
+    console.log('================================');
 
     // Validate inputs
     if (!mongoose.Types.ObjectId.isValid(purchaseId)) {
@@ -406,9 +414,11 @@ export const assignSheet = async (req, res) => {
       existingAssignment.assignedAt = new Date();
       existingAssignment.status = 'assigned';
       existingAssignment.notes = notes || '';
+      existingAssignment.dueDate = dueDate || null;
       existingAssignment.completedAt = null;
       await existingAssignment.save();
 
+      console.log('Updated assignment:', existingAssignment);
       await existingAssignment.populate('technicianId', 'name');
       res.json(existingAssignment);
     } else {
@@ -417,14 +427,17 @@ export const assignSheet = async (req, res) => {
         purchaseId,
         technicianId,
         assignedBy: req.user.userId,
-        notes: notes || ''
+        notes: notes || '',
+        dueDate: dueDate || null
       });
 
       await assignment.save();
+      console.log('Created new assignment:', assignment);
       await assignment.populate('technicianId', 'name');
       res.status(201).json(assignment);
     }
   } catch (err) {
+    console.error('Error in assignSheet:', err);
     res.status(500).json({ error: err.message });
   }
 };

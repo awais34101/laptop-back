@@ -30,6 +30,10 @@ const SheetAssignmentSchema = new mongoose.Schema({
     type: String,
     default: ''
   },
+  dueDate: {
+    type: Date,
+    default: null
+  },
   completedAt: {
     type: Date
   }

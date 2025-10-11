@@ -4,6 +4,7 @@ import Sale from '../models/Sale.js';
 import SaleStore2 from '../models/SaleStore2.js';
 import Purchase from '../models/Purchase.js';
 import Transfer from '../models/Transfer.js';
+import { ChecklistCompletion } from '../models/Checklist.js';
 import { DUBAI_TZ, getDubaiStartOfDayCutoffDaysAgo, formatDubai } from '../utils/dateUtils.js';
 
 // Run auto delete every day at 2:00 AM
@@ -26,7 +27,8 @@ export const startAutoDeleteScheduler = () => {
         sales: 0,
         salesStore2: 0,
         purchases: 0,
-        transfers: 0
+        transfers: 0,
+        checklists: 0
       };
 
       // Precompute cutoffs at Dubai start-of-day to avoid partial-day early deletions
@@ -39,11 +41,15 @@ export const startAutoDeleteScheduler = () => {
       const transferCutoff = settings.auto_delete_transfer_days > 0
         ? getDubaiStartOfDayCutoffDaysAgo(settings.auto_delete_transfer_days, now)
         : null;
+      const checklistCutoff = settings.auto_delete_checklist_days > 0
+        ? getDubaiStartOfDayCutoffDaysAgo(settings.auto_delete_checklist_days, now)
+        : null;
 
       console.log('Auto-delete cutoffs (UTC/Dubai):', {
         sales: salesCutoff ? { utc: salesCutoff.toISOString(), dubai: formatDubai(salesCutoff) } : null,
         purchases: purchaseCutoff ? { utc: purchaseCutoff.toISOString(), dubai: formatDubai(purchaseCutoff) } : null,
         transfers: transferCutoff ? { utc: transferCutoff.toISOString(), dubai: formatDubai(transferCutoff) } : null,
+        checklists: checklistCutoff ? { utc: checklistCutoff.toISOString(), dubai: formatDubai(checklistCutoff) } : null,
       });
 
       // Delete old sales (Store 1)
@@ -68,6 +74,14 @@ export const startAutoDeleteScheduler = () => {
       if (transferCutoff) {
         const deletedTransfers = await Transfer.deleteMany({ date: { $lt: transferCutoff } });
         deletedCounts.transfers = deletedTransfers.deletedCount;
+      }
+
+      // Delete old checklist completions
+      if (checklistCutoff) {
+        const deletedChecklists = await ChecklistCompletion.deleteMany({ 
+          completedAt: { $lt: checklistCutoff } 
+        });
+        deletedCounts.checklists = deletedChecklists.deletedCount;
       }
 
       console.log('Scheduled auto delete completed:', deletedCounts);

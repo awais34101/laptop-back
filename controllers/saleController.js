@@ -108,22 +108,21 @@ export const createSale = async (req, res) => {
       if (!customerDoc) {
         throw new Error('Customer not found');
       }
-      // 1) Check stock for all items inside the transaction
+      
+      // 1) Check stock and update inventory in single loop (optimization)
       for (const saleItem of items) {
         const store = await Store.findOne({ item: saleItem.item }).session(session);
         if (!store || store.remaining_quantity < saleItem.quantity) {
           throw new Error('Not enough stock in store for item');
         }
-      }
-      // 2) Deduct stock and update per-store sale stats
-      for (const saleItem of items) {
-        const store = await Store.findOne({ item: saleItem.item }).session(session);
+        
+        // Immediately update stock after validation
         store.remaining_quantity -= saleItem.quantity;
         store.last_sale_date = new Date();
         store.sale_count = (store.sale_count || 0) + saleItem.quantity;
         await store.save({ session });
 
-        // 2b) Update global Item sale stats
+        // Update global Item sale stats
         const itemDoc = await Item.findById(saleItem.item).session(session);
         if (itemDoc) {
           itemDoc.last_sale_date = new Date();
@@ -131,7 +130,8 @@ export const createSale = async (req, res) => {
           await itemDoc.save({ session });
         }
       }
-      // 3) Save sale
+      
+      // 2) Save sale
       createdSale = new Sale({ items, customer, invoice_number });
       await createdSale.save({ session });
     });

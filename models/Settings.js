@@ -6,6 +6,7 @@ const settingsSchema = new mongoose.Schema({
   auto_delete_sales_days: { type: Number, default: 365 }, // Auto delete sales invoices after X days
   auto_delete_purchase_days: { type: Number, default: 365 }, // Auto delete purchase invoices after X days
   auto_delete_transfer_days: { type: Number, default: 180 }, // Auto delete transfer history after X days
+  auto_delete_checklist_days: { type: Number, default: 90 }, // Auto delete checklist reports after X days
   enable_auto_delete: { type: Boolean, default: false }, // Enable/disable auto delete feature
 });
 

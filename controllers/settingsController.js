@@ -3,6 +3,7 @@ import Sale from '../models/Sale.js';
 import SaleStore2 from '../models/SaleStore2.js';
 import Purchase from '../models/Purchase.js';
 import Transfer from '../models/Transfer.js';
+import { ChecklistCompletion } from '../models/Checklist.js';
 import { getDubaiStartOfDayCutoffDaysAgo, formatDubai } from '../utils/dateUtils.js';
 
 export const getSettings = async (req, res) => {
@@ -28,6 +29,7 @@ export const updateSettings = async (req, res) => {
     settings.auto_delete_sales_days = req.body.auto_delete_sales_days;
     settings.auto_delete_purchase_days = req.body.auto_delete_purchase_days;
     settings.auto_delete_transfer_days = req.body.auto_delete_transfer_days;
+    settings.auto_delete_checklist_days = req.body.auto_delete_checklist_days;
     settings.enable_auto_delete = req.body.enable_auto_delete;
     await settings.save();
     res.json(settings);
@@ -49,7 +51,8 @@ export const autoDeleteOldRecords = async (req, res) => {
       sales: 0,
       salesStore2: 0,
       purchases: 0,
-      transfers: 0
+      transfers: 0,
+      checklists: 0
     };
 
     const salesCutoff = settings.auto_delete_sales_days > 0
@@ -61,11 +64,15 @@ export const autoDeleteOldRecords = async (req, res) => {
     const transferCutoff = settings.auto_delete_transfer_days > 0
       ? getDubaiStartOfDayCutoffDaysAgo(settings.auto_delete_transfer_days, now)
       : null;
+    const checklistCutoff = settings.auto_delete_checklist_days > 0
+      ? getDubaiStartOfDayCutoffDaysAgo(settings.auto_delete_checklist_days, now)
+      : null;
 
     console.log('Manual auto-delete cutoffs (UTC/Dubai):', {
       sales: salesCutoff ? { utc: salesCutoff.toISOString(), dubai: formatDubai(salesCutoff) } : null,
       purchases: purchaseCutoff ? { utc: purchaseCutoff.toISOString(), dubai: formatDubai(purchaseCutoff) } : null,
       transfers: transferCutoff ? { utc: transferCutoff.toISOString(), dubai: formatDubai(transferCutoff) } : null,
+      checklists: checklistCutoff ? { utc: checklistCutoff.toISOString(), dubai: formatDubai(checklistCutoff) } : null,
     });
 
     // Delete old sales (Store 1)
@@ -92,6 +99,14 @@ export const autoDeleteOldRecords = async (req, res) => {
       deletedCounts.transfers = deletedTransfers.deletedCount;
     }
 
+    // Delete old checklist completions
+    if (checklistCutoff) {
+      const deletedChecklists = await ChecklistCompletion.deleteMany({ 
+        completedAt: { $lt: checklistCutoff } 
+      });
+      deletedCounts.checklists = deletedChecklists.deletedCount;
+    }
+
     res.json({
       message: 'Auto delete completed',
       deleted: deletedCounts,
@@ -99,6 +114,7 @@ export const autoDeleteOldRecords = async (req, res) => {
         sales: salesCutoff,
         purchases: purchaseCutoff,
         transfers: transferCutoff,
+        checklists: checklistCutoff,
       }
     });
   } catch (err) {

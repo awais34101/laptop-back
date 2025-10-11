@@ -92,19 +92,19 @@ export const createSaleStore2 = async (req, res) => {
       if (!customerDoc) {
         throw new Error('Customer not found');
       }
-      // Check stock first
-      for (const i of req.body.items) {
-        const s2 = await Store2.findOne({ item: i.item }).session(session);
-        if (!s2 || s2.remaining_quantity < i.quantity) {
-          throw new Error('Not enough stock in store2 for item');
-        }
-      }
-      // Save sale
+      
+      // Save sale first
       created = new SaleStore2(req.body);
       await created.save({ session });
-      // Update Store2 inventory and per-store sale stats
+      
+      // Check stock and update in single loop (optimization)
       for (const i of req.body.items) {
         const store2 = await Store2.findOne({ item: i.item }).session(session);
+        if (!store2 || store2.remaining_quantity < i.quantity) {
+          throw new Error('Not enough stock in store2 for item');
+        }
+        
+        // Immediately update after validation
         store2.remaining_quantity -= i.quantity;
         store2.last_sale_date = new Date();
         store2.sale_count = (store2.sale_count || 0) + i.quantity;

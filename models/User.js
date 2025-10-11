@@ -30,6 +30,7 @@ const AVAILABLE_PERMISSIONS = {
   assignments: { view: true, add: true, edit: true, delete: true },
   alerts: { view: true, add: true, edit: true, delete: true },
   closing: { view: true, add: true, edit: true, delete: true },
+  checklists: { view: true, add: true, edit: true, delete: true, complete: true },
 };
 
 // Full admin permissions

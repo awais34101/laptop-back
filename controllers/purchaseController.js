@@ -483,7 +483,7 @@ export const createSheetTransfer = async (req, res) => {
   const session = await mongoose.startSession();
   try {
     const { purchaseId } = req.params;
-    const { destination, items, notes } = req.body; // destination: 'store' | 'store2'
+    const { destination, items, notes, workType } = req.body; // destination: 'store' | 'store2', workType: 'repair' | 'test'
 
     if (!['store', 'store2'].includes(destination)) {
       return res.status(400).json({ error: 'Destination must be store or store2' });
@@ -491,6 +491,9 @@ export const createSheetTransfer = async (req, res) => {
     if (!mongoose.Types.ObjectId.isValid(purchaseId)) {
       return res.status(400).json({ error: 'Invalid purchase ID' });
     }
+    
+    // Clean workType - convert empty string to undefined
+    const cleanWorkType = workType === '' ? undefined : workType;
 
     const purchase = await Purchase.findById(purchaseId);
     if (!purchase) return res.status(404).json({ error: 'Purchase not found' });
@@ -547,16 +550,28 @@ export const createSheetTransfer = async (req, res) => {
       }
 
       // Record transfer entry with linkage to the sheet
+      console.log('📦 Creating sheet transfer with:', {
+        items: items.length,
+        from: 'warehouse',
+        to: destination,
+        technician: technicianId,
+        workType: cleanWorkType,
+        purchaseId,
+        assignmentId: assignment?._id
+      });
+      
       const transfer = new Transfer({
         items,
         from: 'warehouse',
         to: destination,
         technician: technicianId,
-        workType: undefined,
+        workType: cleanWorkType, // Use workType from request instead of undefined
         purchaseId,
         assignmentId: assignment?._id,
       });
       await transfer.save({ session });
+      
+      console.log('✅ Sheet transfer saved with workType:', transfer.workType);
 
       // Optional: auto-complete if fully transferred
       const newProgress = await computeSheetProgress(purchaseId);

@@ -251,7 +251,7 @@ export const deleteTemplate = async (req, res) => {
 export const getCompletions = async (req, res) => {
   try {
     const { days, templateId, completedBy, status, store, startDate, endDate } = req.query;
-    const filter = { status: { $ne: 'deleted' } }; // Exclude deleted completions from history
+    const filter = {}; // Start with empty filter
 
     // Date filtering
     if (days) {
@@ -267,7 +267,7 @@ export const getCompletions = async (req, res) => {
 
     if (templateId) filter.templateId = templateId;
     if (completedBy) filter.completedBy = completedBy;
-    if (status) filter.status = status; // This will override the $ne filter if status is explicitly requested
+    if (status) filter.status = status;
     if (store) filter.store = store;
 
     const completions = await ChecklistCompletion.find(filter)
@@ -290,7 +290,7 @@ export const getCompletions = async (req, res) => {
 export const getCompletionStats = async (req, res) => {
   try {
     const { days = 30, store } = req.query;
-    const filter = { status: { $ne: 'deleted' } }; // Exclude deleted records from stats
+    const filter = {}; // Start with empty filter (no need to exclude deleted since they're removed)
 
     const daysAgo = new Date();
     daysAgo.setDate(daysAgo.getDate() - parseInt(days));
@@ -462,7 +462,7 @@ export const getTodaysPending = async (req, res) => {
     // Check which ones are already completed or in-progress today
     const existingCompletions = await ChecklistCompletion.find({
       templateId: { $in: templates.map(t => t._id) },
-      status: { $in: ['completed', 'in-progress', 'deleted'] }, // Include deleted status
+      status: { $in: ['completed', 'in-progress'] }, // Only check completed or in-progress
       $or: [
         { completedAt: { $gte: today } },
         { createdAt: { $gte: today } },
@@ -477,12 +477,12 @@ export const getTodaysPending = async (req, res) => {
       completedMap.set(key, true);
     });
 
-    // Check for once templates that have ever been completed OR in-progress OR deleted
+    // Check for once templates that have ever been completed OR in-progress
     const onceTemplateIds = templates.filter(t => t.frequency === 'once').map(t => t._id);
     if (onceTemplateIds.length > 0) {
       const onceCompleted = await ChecklistCompletion.find({
         templateId: { $in: onceTemplateIds },
-        status: { $in: ['completed', 'in-progress', 'deleted'] } // Include deleted status
+        status: { $in: ['completed', 'in-progress'] } // Only check completed or in-progress
       }).select('templateId store');
 
       onceCompleted.forEach(c => {
@@ -590,9 +590,8 @@ export const deleteCompletion = async (req, res) => {
       return res.status(403).json({ message: 'Not authorized to delete this record' });
     }
 
-    // Mark as deleted instead of actually deleting so it won't reappear in pending list
-    completion.status = 'deleted';
-    await completion.save();
+    // Actually delete the record from database (hard delete)
+    await ChecklistCompletion.findByIdAndDelete(req.params.id);
     
     res.json({ message: 'Completion record deleted successfully' });
   } catch (error) {

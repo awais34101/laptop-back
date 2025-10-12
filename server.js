@@ -31,6 +31,7 @@ import partsUsageRoutes from './routes/partsUsageRoutes.js';
 import documentRoutes from './routes/documentRoutes.js';
 import timeRoutes from './routes/timeRoutes.js';
 import checklistRoutes from './routes/checklistRoutes.js';
+import inventoryBoxRoutes from './routes/inventoryBoxRoutes.js';
 import errorHandler from './middleware/errorHandler.js';
 
 dotenv.config();
@@ -99,6 +100,7 @@ app.use('/api/parts-usage', partsUsageRoutes);
 app.use('/api/documents', documentRoutes);
 app.use('/api/time', timeRoutes);
 app.use('/api/checklists', checklistRoutes);
+app.use('/api/inventory-boxes', inventoryBoxRoutes);
 
 // Closing summary route
 app.use('/api/closing', closingRoutes);

@@ -5,6 +5,7 @@ import bcrypt from 'bcryptjs';
 const AVAILABLE_PERMISSIONS = {
   dashboard: { view: true },
   items: { view: true, add: true, edit: true, delete: true },
+  inventoryBoxes: { view: true, add: true, edit: true, delete: true },
   purchases: { view: true, add: true, edit: true, delete: true },
   purchaseSheets: { view: true, add: true, edit: true, delete: true },
   returnsStore: { view: true, add: true, edit: true, delete: true },
@@ -42,6 +43,7 @@ const ROLE_PERMISSIONS = {
   manager: {
     dashboard: { view: true },
     items: { view: true, add: true, edit: true, delete: true },
+    inventoryBoxes: { view: true, add: true, edit: true, delete: true },
     purchases: { view: true, add: true, edit: true, delete: true },
     purchaseSheets: { view: true, add: true, edit: true, delete: true },
     returnsStore: { view: true, add: true, edit: true, delete: true },
@@ -68,6 +70,8 @@ const ROLE_PERMISSIONS = {
   },
   staff: {
     dashboard: { view: true },
+    items: { view: true, add: true, edit: true },
+    inventoryBoxes: { view: true, add: true, edit: true },
     sales: { view: true, add: true, edit: true },
     salesStore2: { view: true, add: true, edit: true },
     customers: { view: true, add: true, edit: true },
@@ -82,6 +86,13 @@ const ROLE_PERMISSIONS = {
     purchaseSheets: { view: true },
     technicians: { view: true },
     warehouse: { view: true },
+    time: { view: true, add: true, edit: true },
+    returnsStore: { view: true, add: true, edit: true },
+    returnsStore2: { view: true, add: true, edit: true },
+    closingStore1: { view: true, add: true, edit: true },
+    closingStore2: { view: true, add: true, edit: true },
+    checklists: { view: true, add: true, edit: true, complete: true },
+    settings: { view: true },
   },
   technician: {
     dashboard: { view: true },

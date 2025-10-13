@@ -3,6 +3,7 @@ import SaleStore2 from '../models/SaleStore2.js';
 import Store2 from '../models/Store2.js';
 import Item from '../models/Item.js';
 import Customer from '../models/Customer.js';
+import InventoryBox from '../models/InventoryBox.js';
 import Joi from 'joi';
 
 const saleItemSchema = Joi.object({
@@ -16,6 +17,46 @@ const saleSchema = Joi.object({
   customer: Joi.string().required(),
   invoice_number: Joi.string().allow(''),
 });
+
+// Helper function to remove items from boxes using FIFO (highest box number first)
+const removeFromBoxesFIFO = async (itemId, quantity, location, session) => {
+  // Get boxes containing this item, sorted by box number (descending for FIFO)
+  const boxes = await InventoryBox.find({ 
+    location, 
+    'items.itemId': itemId 
+  }).sort({ boxNumber: -1 }).session(session);
+
+  let remainingQty = quantity;
+
+  // Remove from highest box number first (FIFO)
+  for (let box of boxes) {
+    if (remainingQty <= 0) break;
+
+    const itemIndex = box.items.findIndex(i => i.itemId.toString() === itemId.toString());
+    if (itemIndex === -1) continue;
+
+    const itemInBox = box.items[itemIndex];
+    const qtyToRemove = Math.min(remainingQty, itemInBox.quantity);
+
+    itemInBox.quantity -= qtyToRemove;
+    remainingQty -= qtyToRemove;
+
+    // Remove item from box if quantity is 0
+    if (itemInBox.quantity <= 0) {
+      box.items.splice(itemIndex, 1);
+    }
+
+    // Update box status
+    const newTotal = box.items.reduce((sum, item) => sum + item.quantity, 0);
+    box.status = newTotal >= box.capacity ? 'Full' : 'Active';
+    box.updatedAt = Date.now();
+
+    await box.save({ session });
+  }
+
+  return remainingQty === 0;
+};
+
 
 export const getSalesStore2 = async (req, res) => {
   try {
@@ -109,6 +150,9 @@ export const createSaleStore2 = async (req, res) => {
         store2.last_sale_date = new Date();
         store2.sale_count = (store2.sale_count || 0) + i.quantity;
         await store2.save({ session });
+
+        // Remove items from boxes using FIFO (highest box number first)
+        await removeFromBoxesFIFO(i.item, i.quantity, 'Store2', session);
 
         // Update global Item sale stats
         const itemDoc = await Item.findById(i.item).session(session);

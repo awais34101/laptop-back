@@ -4,14 +4,15 @@ const inventoryBoxSchema = new mongoose.Schema({
   boxNumber: { 
     type: String, 
     required: true, 
-    unique: true, 
     trim: true 
+    // Removed global unique - will use compound index instead
   },
   location: { 
     type: String, 
     required: true,
+    enum: ['Store', 'Store2', 'Warehouse'],
     trim: true,
-    default: 'Showroom'
+    default: 'Store'
   },
   description: { 
     type: String, 
@@ -50,8 +51,10 @@ const inventoryBoxSchema = new mongoose.Schema({
   timestamps: true
 });
 
-// Index for faster searches
-inventoryBoxSchema.index({ boxNumber: 1 });
+// Compound unique index - boxNumber must be unique per location
+inventoryBoxSchema.index({ boxNumber: 1, location: 1 }, { unique: true });
+
+// Additional indexes for faster searches
 inventoryBoxSchema.index({ location: 1 });
 inventoryBoxSchema.index({ 'items.itemId': 1 });
 

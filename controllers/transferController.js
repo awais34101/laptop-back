@@ -2,6 +2,8 @@ import Transfer from '../models/Transfer.js';
 import Warehouse from '../models/Warehouse.js';
 import Store from '../models/Store.js';
 import Store2 from '../models/Store2.js';
+import InventoryBox from '../models/InventoryBox.js';
+import Item from '../models/Item.js';
 import mongoose from 'mongoose';
 import Joi from 'joi';
 
@@ -17,6 +19,135 @@ const transferSchema = Joi.object({
   technician: Joi.string().optional().allow(null, ''),
   workType: Joi.string().valid('repair', 'test', '').optional().allow(null, ''),
 });
+
+// Helper function to remove items from boxes using FIFO (highest box number first)
+const removeFromBoxesFIFO = async (itemId, quantity, location, session) => {
+  // Map location names to box location format
+  const boxLocation = location === 'warehouse' ? 'Warehouse' : location === 'store' ? 'Store' : 'Store2';
+  
+  // Get boxes containing this item, sorted by box number (descending for FIFO)
+  const boxes = await InventoryBox.find({ 
+    location: boxLocation, 
+    'items.itemId': itemId 
+  }).sort({ boxNumber: -1 }).session(session);
+
+  let remainingQty = quantity;
+
+  // Remove from highest box number first (FIFO)
+  for (let box of boxes) {
+    if (remainingQty <= 0) break;
+
+    const itemIndex = box.items.findIndex(i => i.itemId.toString() === itemId.toString());
+    if (itemIndex === -1) continue;
+
+    const itemInBox = box.items[itemIndex];
+    const qtyToRemove = Math.min(remainingQty, itemInBox.quantity);
+
+    itemInBox.quantity -= qtyToRemove;
+    remainingQty -= qtyToRemove;
+
+    // Remove item from box if quantity is 0
+    if (itemInBox.quantity <= 0) {
+      box.items.splice(itemIndex, 1);
+    }
+
+    // Update box status
+    const newTotal = box.items.reduce((sum, item) => sum + item.quantity, 0);
+    box.status = newTotal >= box.capacity ? 'Full' : 'Active';
+    box.updatedAt = Date.now();
+
+    await box.save({ session });
+  }
+
+  return remainingQty === 0;
+};
+
+// Helper function to add items to boxes (find active boxes or create new ones if needed)
+const addToBoxes = async (itemId, quantity, location, session) => {
+  // Map location names to box location format
+  const boxLocation = location === 'warehouse' ? 'Warehouse' : location === 'store' ? 'Store' : 'Store2';
+  
+  // Get item details
+  const item = await Item.findById(itemId).session(session);
+  if (!item) {
+    console.warn(`Item ${itemId} not found when adding to boxes`);
+    return;
+  }
+
+  // Find active boxes for this location and item, sorted by box number (ascending)
+  const boxes = await InventoryBox.find({ 
+    location: boxLocation,
+    'items.itemId': itemId,
+    status: { $ne: 'Full' }
+  }).sort({ boxNumber: 1 }).session(session);
+
+  let remainingQty = quantity;
+
+  // Try to add to existing boxes first
+  for (let box of boxes) {
+    if (remainingQty <= 0) break;
+
+    const itemIndex = box.items.findIndex(i => i.itemId.toString() === itemId.toString());
+    if (itemIndex === -1) continue;
+
+    const itemInBox = box.items[itemIndex];
+    const availableSpace = box.capacity - box.items.reduce((sum, i) => sum + i.quantity, 0);
+    const qtyToAdd = Math.min(remainingQty, availableSpace);
+
+    if (qtyToAdd > 0) {
+      itemInBox.quantity += qtyToAdd;
+      remainingQty -= qtyToAdd;
+
+      // Update box status
+      const newTotal = box.items.reduce((sum, item) => sum + item.quantity, 0);
+      box.status = newTotal >= box.capacity ? 'Full' : 'Active';
+      box.updatedAt = Date.now();
+
+      await box.save({ session });
+    }
+  }
+
+  // If there's still remaining quantity, create a new box or add to boxes without this item
+  if (remainingQty > 0) {
+    // Try to find any active box in this location with space
+    const anyActiveBox = await InventoryBox.findOne({
+      location: boxLocation,
+      status: { $ne: 'Full' }
+    }).sort({ boxNumber: 1 }).session(session);
+
+    if (anyActiveBox) {
+      const currentTotal = anyActiveBox.items.reduce((sum, i) => sum + i.quantity, 0);
+      const availableSpace = anyActiveBox.capacity - currentTotal;
+      const qtyToAdd = Math.min(remainingQty, availableSpace);
+
+      if (qtyToAdd > 0) {
+        // Add this item to the box
+        anyActiveBox.items.push({
+          itemId,
+          itemName: item.name,
+          quantity: qtyToAdd,
+          notes: `Added from transfer on ${new Date().toLocaleDateString()}`
+        });
+
+        remainingQty -= qtyToAdd;
+
+        // Update box status
+        const newTotal = anyActiveBox.items.reduce((sum, item) => sum + item.quantity, 0);
+        anyActiveBox.status = newTotal >= anyActiveBox.capacity ? 'Full' : 'Active';
+        anyActiveBox.updatedAt = Date.now();
+
+        await anyActiveBox.save({ session });
+      }
+    }
+  }
+
+  // Note: If there's still remaining quantity and no boxes available, 
+  // the items remain in inventory but not assigned to boxes
+  // This is acceptable as boxes can be created manually later
+  if (remainingQty > 0) {
+    console.log(`${remainingQty} units of ${item.name} added to ${boxLocation} inventory but not assigned to boxes (no space available)`);
+  }
+};
 
 export const getTransfers = async (req, res) => {
   try {
@@ -245,6 +376,9 @@ export const createTransfer = async (req, res) => {
         }
         await fromDoc.save({ session });
 
+        // Remove from source boxes using FIFO
+        await removeFromBoxesFIFO(item, quantity, from, session);
+
         // Add to destination
         if (toDoc) {
           if (to === 'warehouse') {
@@ -262,6 +396,9 @@ export const createTransfer = async (req, res) => {
             await Store2.create([{ item, remaining_quantity: quantity }], { session });
           }
         }
+
+        // Add to destination boxes
+        await addToBoxes(item, quantity, to, session);
       }
 
       // STEP 3: Save the transfer record
@@ -313,7 +450,7 @@ export const updateTransfer = async (req, res) => {
     let updatedTransfer;
 
     await session.withTransaction(async () => {
-      // 1) Revert previous inventory effects
+      // 1) Revert previous inventory effects (including boxes)
       for (const prev of transfer.items) {
         const FromModelPrev = getModel(transfer.from);
         const ToModelPrev = getModel(transfer.to);
@@ -323,7 +460,7 @@ export const updateTransfer = async (req, res) => {
         let fromDocPrev = await FromModelPrev.findOne({ item: prev.item }).session(session);
         let toDocPrev = await ToModelPrev.findOne({ item: prev.item }).session(session);
 
-        // Add back to source
+        // Add back to source inventory
         if (fromDocPrev) {
           fromDocPrev[fromFieldPrev] = (fromDocPrev[fromFieldPrev] || 0) + prev.quantity;
           await fromDocPrev.save({ session });
@@ -333,11 +470,18 @@ export const updateTransfer = async (req, res) => {
           payload[fromFieldPrev] = prev.quantity;
           await getModel(transfer.from).create([payload], { session });
         }
-        // Subtract from destination
+
+        // Add back to source boxes
+        await addToBoxes(prev.item, prev.quantity, transfer.from, session);
+
+        // Subtract from destination inventory
         if (toDocPrev) {
           toDocPrev[toFieldPrev] = Math.max(0, (toDocPrev[toFieldPrev] || 0) - prev.quantity);
           await toDocPrev.save({ session });
         }
+
+        // Remove from destination boxes
+        await removeFromBoxesFIFO(prev.item, prev.quantity, transfer.to, session);
       }
 
       // 2) Check ALL new items have sufficient stock BEFORE making any changes
@@ -354,12 +498,12 @@ export const updateTransfer = async (req, res) => {
         stockChecks.push({ fromDoc, item, quantity });
       }
 
-      // 3) Apply new transfer
+      // 3) Apply new transfer (including boxes)
       for (const { fromDoc, item, quantity } of stockChecks) {
         const ToModel = getModel(to);
         let toDoc = await ToModel.findOne({ item }).session(session);
 
-        // Deduct from source
+        // Deduct from source inventory
         if (from === 'warehouse') {
           fromDoc.quantity -= quantity;
         } else {
@@ -367,7 +511,10 @@ export const updateTransfer = async (req, res) => {
         }
         await fromDoc.save({ session });
 
-        // Add to destination
+        // Remove from source boxes using FIFO
+        await removeFromBoxesFIFO(item, quantity, from, session);
+
+        // Add to destination inventory
         if (toDoc) {
           if (to === 'warehouse') {
             toDoc.quantity += quantity;
@@ -384,6 +531,9 @@ export const updateTransfer = async (req, res) => {
             await Store2.create([{ item, remaining_quantity: quantity }], { session });
           }
         }
+
+        // Add to destination boxes
+        await addToBoxes(item, quantity, to, session);
       }
 
       // 4) Update transfer record

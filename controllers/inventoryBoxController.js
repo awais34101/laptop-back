@@ -731,3 +731,112 @@ export const getBoxesByLocation = async (req, res) => {
   }
 };
 
+// Auto-replenish boxes from unassigned inventory
+export const autoReplenishBoxes = async (req, res) => {
+  try {
+    const { location } = req.params;
+    
+    if (!['Store', 'Store2', 'Warehouse'].includes(location)) {
+      return res.status(400).json({ error: 'Invalid location' });
+    }
+
+    let inventoryModel;
+    if (location === 'Warehouse') inventoryModel = Warehouse;
+    else if (location === 'Store') inventoryModel = Store;
+    else inventoryModel = Store2;
+
+    console.log(`[AutoReplenish] Starting auto-replenishment for ${location}...`);
+
+    // Get all inventory items
+    const inventory = await inventoryModel.find().populate('item', 'name unit category');
+    
+    // Get all boxes in this location
+    const boxes = await InventoryBox.find({ location }).sort({ boxNumber: 1 });
+    
+    // Calculate items in boxes
+    const itemsInBoxes = {};
+    boxes.forEach(box => {
+      box.items.forEach(item => {
+        if (item.itemId) {
+          const itemIdStr = item.itemId.toString();
+          itemsInBoxes[itemIdStr] = (itemsInBoxes[itemIdStr] || 0) + item.quantity;
+        }
+      });
+    });
+
+    let replenishedBoxes = [];
+    let totalReplenished = 0;
+
+    // For each box, check if it has available space and can be replenished
+    for (const box of boxes) {
+      const currentItems = box.items.reduce((sum, item) => sum + item.quantity, 0);
+      const availableSpace = box.capacity - currentItems;
+      
+      if (availableSpace > 0 && box.status !== 'Inactive') {
+        console.log(`[AutoReplenish] Box #${box.boxNumber} has ${availableSpace} available spaces`);
+        
+        // For each item currently in the box, try to replenish it
+        for (const boxItem of box.items) {
+          if (boxItem.quantity < box.capacity) {
+            const itemIdStr = boxItem.itemId.toString();
+            
+            // Find the inventory record for this item
+            const invRecord = inventory.find(inv => inv.item && inv.item._id.toString() === itemIdStr);
+            
+            if (invRecord) {
+              const totalQty = location === 'Warehouse' ? invRecord.quantity : invRecord.remaining_quantity;
+              const inBoxes = itemsInBoxes[itemIdStr] || 0;
+              const unassigned = totalQty - inBoxes;
+              
+              if (unassigned > 0) {
+                // Calculate how much we can add to this box for this item
+                const spaceLeft = box.capacity - currentItems;
+                const canAdd = Math.min(unassigned, spaceLeft);
+                
+                if (canAdd > 0) {
+                  // Update the item quantity in the box
+                  boxItem.quantity += canAdd;
+                  itemsInBoxes[itemIdStr] = (itemsInBoxes[itemIdStr] || 0) + canAdd;
+                  totalReplenished += canAdd;
+                  
+                  console.log(`[AutoReplenish] Added ${canAdd} of ${invRecord.item.name} to Box #${box.boxNumber}`);
+                  
+                  replenishedBoxes.push({
+                    boxNumber: box.boxNumber,
+                    itemName: invRecord.item.name,
+                    quantityAdded: canAdd
+                  });
+                }
+              }
+            }
+          }
+        }
+        
+        // Save the box if it was modified
+        if (replenishedBoxes.some(r => r.boxNumber === box.boxNumber)) {
+          await box.save();
+          
+          // Update box status if now full
+          const newTotal = box.items.reduce((sum, item) => sum + item.quantity, 0);
+          if (newTotal >= box.capacity) {
+            box.status = 'Full';
+            await box.save();
+          }
+        }
+      }
+    }
+
+    console.log(`[AutoReplenish] Completed. Total items replenished: ${totalReplenished}`);
+
+    res.json({
+      success: true,
+      location,
+      totalReplenished,
+      boxesUpdated: replenishedBoxes.length,
+      details: replenishedBoxes
+    });
+  } catch (err) {
+    console.error('[AutoReplenish] Error:', err);
+    res.status(500).json({ error: err.message });
+  }
+};

@@ -16,7 +16,8 @@ import {
   autoDistributeItems,
   removeItemsFromBoxes,
   getItemDistribution,
-  getBoxesByLocation
+  getBoxesByLocation,
+  autoReplenishBoxes
 } from '../controllers/inventoryBoxController.js';
 import auth from '../middleware/auth.js';
 
@@ -47,5 +48,6 @@ router.get('/item/:itemId', findItemInBox);
 // Auto-distribution routes
 router.post('/distribute', autoDistributeItems);
 router.post('/remove', removeItemsFromBoxes);
+router.post('/location/:location/auto-replenish', autoReplenishBoxes);
 
 export default router;

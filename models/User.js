@@ -197,6 +197,35 @@ const userSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
     default: null
+  },
+  // Biometric fingerprint data
+  fingerprintTemplate: {
+    type: String, // Store encrypted fingerprint template as base64
+    default: null
+  },
+  fingerprintEnrolledAt: {
+    type: Date,
+    default: null
+  },
+  fingerprintLastUsed: {
+    type: Date,
+    default: null
+  },
+  biometricEnabled: {
+    type: Boolean,
+    default: false
+  },
+  // Store employee ID for quick identification
+  employeeId: {
+    type: String,
+    unique: true,
+    sparse: true, // Allows null values to not conflict with unique constraint
+    trim: true
+  },
+  // Photo for visual verification on iPad
+  photoUrl: {
+    type: String,
+    default: null
   }
 }, { 
   timestamps: true,

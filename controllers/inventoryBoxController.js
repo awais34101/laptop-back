@@ -735,9 +735,14 @@ export const getBoxesByLocation = async (req, res) => {
 export const autoReplenishBoxes = async (req, res) => {
   try {
     const { location } = req.params;
+    const { itemId } = req.body; // Get specific item to replenish
     
     if (!['Store', 'Store2', 'Warehouse'].includes(location)) {
       return res.status(400).json({ error: 'Invalid location' });
+    }
+
+    if (!itemId) {
+      return res.status(400).json({ error: 'Item ID is required for auto-replenish' });
     }
 
     let inventoryModel;
@@ -746,94 +751,125 @@ export const autoReplenishBoxes = async (req, res) => {
     else inventoryModel = Store2;
 
     console.log(`[AutoReplenish] Starting auto-replenishment for ${location}...`);
+    console.log(`[AutoReplenish] Item ID: ${itemId}`);
 
-    // Get all inventory items
-    const inventory = await inventoryModel.find().populate('item', 'name unit category');
+    // Get the specific inventory item
+    const inventory = await inventoryModel.findOne({ item: itemId }).populate('item', 'name unit category');
+    
+    if (!inventory || !inventory.item) {
+      return res.status(404).json({ error: 'Item not found in inventory' });
+    }
+
+    const itemName = inventory.item.name;
+    const totalQty = location === 'Warehouse' ? inventory.quantity : inventory.remaining_quantity;
+
+    console.log(`[AutoReplenish] ${itemName} - Total quantity in ${location}: ${totalQty}`);
     
     // Get all boxes in this location
     const boxes = await InventoryBox.find({ location }).sort({ boxNumber: 1 });
     
-    // Calculate items in boxes
-    const itemsInBoxes = {};
+    // Calculate how much of this item is already in boxes
+    let itemsInBoxes = 0;
     boxes.forEach(box => {
       box.items.forEach(item => {
-        if (item.itemId) {
-          const itemIdStr = item.itemId.toString();
-          itemsInBoxes[itemIdStr] = (itemsInBoxes[itemIdStr] || 0) + item.quantity;
+        if (item.itemId && item.itemId.toString() === itemId) {
+          itemsInBoxes += item.quantity;
         }
       });
     });
 
+    const unassigned = totalQty - itemsInBoxes;
+    console.log(`[AutoReplenish] ${itemName} - In boxes: ${itemsInBoxes}, Unassigned: ${unassigned}`);
+
+    if (unassigned <= 0) {
+      return res.json({
+        success: true,
+        location,
+        totalReplenished: 0,
+        boxesUpdated: 0,
+        message: `All ${itemName} are already assigned to boxes`
+      });
+    }
+
     let replenishedBoxes = [];
     let totalReplenished = 0;
+    let remainingToAssign = unassigned;
 
-    // For each box, check if it has available space and can be replenished
+    // For each box, check if it has available space
     for (const box of boxes) {
-      const currentItems = box.items.reduce((sum, item) => sum + item.quantity, 0);
-      const availableSpace = box.capacity - currentItems;
+      if (remainingToAssign <= 0) break;
+      
+      let currentItems = box.items.reduce((sum, item) => sum + item.quantity, 0);
+      let availableSpace = box.capacity - currentItems;
       
       if (availableSpace > 0 && box.status !== 'Inactive') {
         console.log(`[AutoReplenish] Box #${box.boxNumber} has ${availableSpace} available spaces`);
         
-        // For each item currently in the box, try to replenish it
-        for (const boxItem of box.items) {
-          if (boxItem.quantity < box.capacity) {
-            const itemIdStr = boxItem.itemId.toString();
-            
-            // Find the inventory record for this item
-            const invRecord = inventory.find(inv => inv.item && inv.item._id.toString() === itemIdStr);
-            
-            if (invRecord) {
-              const totalQty = location === 'Warehouse' ? invRecord.quantity : invRecord.remaining_quantity;
-              const inBoxes = itemsInBoxes[itemIdStr] || 0;
-              const unassigned = totalQty - inBoxes;
-              
-              if (unassigned > 0) {
-                // Calculate how much we can add to this box for this item
-                const spaceLeft = box.capacity - currentItems;
-                const canAdd = Math.min(unassigned, spaceLeft);
-                
-                if (canAdd > 0) {
-                  // Update the item quantity in the box
-                  boxItem.quantity += canAdd;
-                  itemsInBoxes[itemIdStr] = (itemsInBoxes[itemIdStr] || 0) + canAdd;
-                  totalReplenished += canAdd;
-                  
-                  console.log(`[AutoReplenish] Added ${canAdd} of ${invRecord.item.name} to Box #${box.boxNumber}`);
-                  
-                  replenishedBoxes.push({
-                    boxNumber: box.boxNumber,
-                    itemName: invRecord.item.name,
-                    quantityAdded: canAdd
-                  });
-                }
-              }
-            }
-          }
-        }
+        // Check if this item is already in the box
+        const existingItemIndex = box.items.findIndex(item => item.itemId && item.itemId.toString() === itemId);
         
-        // Save the box if it was modified
-        if (replenishedBoxes.some(r => r.boxNumber === box.boxNumber)) {
-          await box.save();
+        const canAdd = Math.min(remainingToAssign, availableSpace);
+        
+        if (canAdd > 0) {
+          if (existingItemIndex > -1) {
+            // Update existing item
+            box.items[existingItemIndex].quantity += canAdd;
+            console.log(`[AutoReplenish] Replenished ${canAdd} of ${itemName} to Box #${box.boxNumber} (existing item)`);
+          } else {
+            // Add new item to box
+            box.items.push({
+              itemId,
+              itemName,
+              quantity: canAdd,
+              notes: `Auto-replenished on ${new Date().toLocaleDateString()}`
+            });
+            console.log(`[AutoReplenish] Added ${canAdd} of ${itemName} to Box #${box.boxNumber} (new item)`);
+          }
           
-          // Update box status if now full
+          remainingToAssign -= canAdd;
+          totalReplenished += canAdd;
+          
+          replenishedBoxes.push({
+            boxNumber: box.boxNumber,
+            itemName,
+            quantityAdded: canAdd
+          });
+          
+          // Update box status
           const newTotal = box.items.reduce((sum, item) => sum + item.quantity, 0);
           if (newTotal >= box.capacity) {
             box.status = 'Full';
-            await box.save();
+          } else {
+            box.status = 'Active';
           }
+          
+          box.updatedAt = Date.now();
+          await box.save();
         }
       }
     }
 
     console.log(`[AutoReplenish] Completed. Total items replenished: ${totalReplenished}`);
 
+    if (remainingToAssign > 0) {
+      return res.json({
+        success: true,
+        location,
+        totalReplenished,
+        boxesUpdated: replenishedBoxes.length,
+        remaining: remainingToAssign,
+        details: replenishedBoxes,
+        message: `Replenished ${totalReplenished} ${itemName}. ${remainingToAssign} could not be assigned (no box space available).`
+      });
+    }
+
     res.json({
       success: true,
       location,
       totalReplenished,
       boxesUpdated: replenishedBoxes.length,
-      details: replenishedBoxes
+      details: replenishedBoxes,
+      message: `Successfully replenished ${totalReplenished} ${itemName} across ${replenishedBoxes.length} boxes`
     });
   } catch (err) {
     console.error('[AutoReplenish] Error:', err);

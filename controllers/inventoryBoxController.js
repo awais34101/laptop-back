@@ -731,7 +731,165 @@ export const getBoxesByLocation = async (req, res) => {
   }
 };
 
-// Auto-replenish boxes from unassigned inventory
+// Auto-replenish ALL boxes from unassigned inventory (Smart One-Click)
+export const autoReplenishAllBoxes = async (req, res) => {
+  try {
+    const { location } = req.params;
+    
+    if (!['Store', 'Store2', 'Warehouse'].includes(location)) {
+      return res.status(400).json({ error: 'Invalid location' });
+    }
+
+    let inventoryModel;
+    if (location === 'Warehouse') inventoryModel = Warehouse;
+    else if (location === 'Store') inventoryModel = Store;
+    else inventoryModel = Store2;
+
+    console.log(`[AutoReplenishAll] Starting smart auto-replenishment for ALL items in ${location}...`);
+
+    // Get all inventory items in this location
+    const allInventory = await inventoryModel.find().populate('item', 'name unit category');
+    
+    // Get all boxes in this location
+    const allBoxes = await InventoryBox.find({ location }).sort({ boxNumber: 1 });
+    
+    // Track which items are in boxes and which boxes have which items
+    const itemsInBoxesMap = {}; // itemId -> total quantity in boxes
+    const boxesWithItemsMap = {}; // itemId -> [boxIds that had this item before]
+    
+    allBoxes.forEach(box => {
+      box.items.forEach(item => {
+        if (item.itemId) {
+          const itemIdStr = item.itemId.toString();
+          itemsInBoxesMap[itemIdStr] = (itemsInBoxesMap[itemIdStr] || 0) + item.quantity;
+          
+          if (!boxesWithItemsMap[itemIdStr]) {
+            boxesWithItemsMap[itemIdStr] = [];
+          }
+          if (!boxesWithItemsMap[itemIdStr].includes(box._id.toString())) {
+            boxesWithItemsMap[itemIdStr].push(box._id.toString());
+          }
+        }
+      });
+    });
+
+    const replenishmentResults = [];
+    let totalItemsReplenished = 0;
+    let totalBoxesUpdated = 0;
+
+    // Process each inventory item
+    for (const inventory of allInventory) {
+      if (!inventory.item) continue;
+      
+      const itemId = inventory.item._id.toString();
+      const itemName = inventory.item.name;
+      const totalQty = location === 'Warehouse' ? inventory.quantity : inventory.remaining_quantity;
+      const inBoxes = itemsInBoxesMap[itemId] || 0;
+      const unassigned = totalQty - inBoxes;
+
+      // Skip if no unassigned quantity or if this item was never in boxes
+      if (unassigned <= 0 || !boxesWithItemsMap[itemId]) {
+        continue;
+      }
+
+      console.log(`[AutoReplenishAll] Processing ${itemName}: Total=${totalQty}, InBoxes=${inBoxes}, Unassigned=${unassigned}`);
+
+      // Get boxes that previously had this item
+      const targetBoxes = allBoxes.filter(box => 
+        boxesWithItemsMap[itemId].includes(box._id.toString()) &&
+        box.status !== 'Inactive'
+      ).sort((a, b) => parseInt(a.boxNumber) - parseInt(b.boxNumber));
+
+      if (targetBoxes.length === 0) {
+        console.log(`[AutoReplenishAll] No target boxes found for ${itemName}`);
+        continue;
+      }
+
+      let remainingToAssign = unassigned;
+      let itemBoxesUpdated = 0;
+      let itemQtyReplenished = 0;
+
+      // Distribute unassigned items to their original boxes
+      for (const box of targetBoxes) {
+        if (remainingToAssign <= 0) break;
+        
+        const currentItems = box.items.reduce((sum, item) => sum + item.quantity, 0);
+        const availableSpace = box.capacity - currentItems;
+        
+        if (availableSpace > 0) {
+          const existingItemIndex = box.items.findIndex(item => 
+            item.itemId && item.itemId.toString() === itemId
+          );
+          
+          const canAdd = Math.min(remainingToAssign, availableSpace);
+          
+          if (canAdd > 0) {
+            if (existingItemIndex > -1) {
+              box.items[existingItemIndex].quantity += canAdd;
+            } else {
+              box.items.push({
+                itemId,
+                itemName,
+                quantity: canAdd,
+                notes: `Auto-replenished on ${new Date().toLocaleDateString()}`
+              });
+            }
+            
+            remainingToAssign -= canAdd;
+            itemQtyReplenished += canAdd;
+            itemBoxesUpdated++;
+            
+            // Update box status
+            const newTotal = box.items.reduce((sum, item) => sum + item.quantity, 0);
+            box.status = newTotal >= box.capacity ? 'Full' : 'Active';
+            box.updatedAt = Date.now();
+            
+            await box.save();
+          }
+        }
+      }
+
+      if (itemQtyReplenished > 0) {
+        replenishmentResults.push({
+          itemName,
+          quantityReplenished: itemQtyReplenished,
+          boxesUpdated: itemBoxesUpdated,
+          remaining: remainingToAssign
+        });
+        
+        totalItemsReplenished += itemQtyReplenished;
+        totalBoxesUpdated += itemBoxesUpdated;
+      }
+    }
+
+    console.log(`[AutoReplenishAll] Completed. Total replenished: ${totalItemsReplenished} items across ${totalBoxesUpdated} box updates`);
+
+    if (replenishmentResults.length === 0) {
+      return res.json({
+        success: true,
+        location,
+        message: 'No items needed replenishment. All boxes are at capacity or no unassigned inventory available.',
+        totalItemsReplenished: 0,
+        totalBoxesUpdated: 0,
+        details: []
+      });
+    }
+
+    res.json({
+      success: true,
+      location,
+      message: `Successfully replenished ${replenishmentResults.length} item type(s)`,
+      totalItemsReplenished,
+      totalBoxesUpdated,
+      details: replenishmentResults
+    });
+  } catch (err) {
+    console.error('[AutoReplenishAll] Error:', err);
+    res.status(500).json({ error: err.message });
+  }
+};
+
+// Auto-replenish boxes from unassigned inventory (Single Item)
 export const autoReplenishBoxes = async (req, res) => {
   try {
     const { location } = req.params;

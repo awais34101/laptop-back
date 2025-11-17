@@ -331,7 +331,7 @@ export async function biometricClockOut(req, res) {
       });
     }
     
-    // Find active entry
+    // Find active entry FOR THE MATCHED USER ONLY
     const now = new Date();
     const startOfDay = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
     
@@ -342,8 +342,22 @@ export async function biometricClockOut(req, res) {
     });
     
     if (!activeEntry) {
+      // Check if someone else is clocked in
+      const anyActiveEntry = await TimeEntry.findOne({
+        date: startOfDay,
+        clockOut: null
+      }).populate('user', 'name');
+      
+      if (anyActiveEntry) {
+        return res.status(403).json({ 
+          error: `You cannot clock out ${anyActiveEntry.user.name}. Only ${anyActiveEntry.user.name} can clock themselves out.`,
+          currentlyClockedInUser: anyActiveEntry.user.name,
+          attemptedUser: matchedUser.name
+        });
+      }
+      
       return res.status(400).json({ 
-        error: `${matchedUser.name} is not currently clocked in`,
+        error: `${matchedUser.name} is not currently clocked in today`,
         user: {
           name: matchedUser.name
         }

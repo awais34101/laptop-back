@@ -13,13 +13,27 @@ export const updatePurchase = async (req, res) => {
   const session = await mongoose.startSession();
   try {
     const { error } = purchaseSchema.validate(req.body);
-    if (error) return res.status(400).json({ error: error.details[0].message });
+    if (error) {
+      let friendlyMessage = error.details[0].message;
+      if (error.details[0].path.includes('items')) {
+        friendlyMessage = 'Please add at least one item to the purchase invoice with valid quantity and price.';
+      } else if (error.details[0].path.includes('supplier')) {
+        friendlyMessage = 'Supplier name is required. Please enter the supplier name.';
+      } else if (error.details[0].path.includes('invoice_number')) {
+        friendlyMessage = 'Invoice number is required. Please enter a unique invoice number.';
+      } else if (error.details[0].path.includes('quantity')) {
+        friendlyMessage = 'Quantity must be at least 1 for all items.';
+      } else if (error.details[0].path.includes('price')) {
+        friendlyMessage = 'Price must be 0 or greater for all items.';
+      }
+      return res.status(400).json({ error: friendlyMessage });
+    }
     const { items, supplier, invoice_number } = req.body;
     const purchase = await Purchase.findById(req.params.id).session(session);
-    if (!purchase) return res.status(404).json({ error: 'Purchase not found' });
+    if (!purchase) return res.status(404).json({ error: 'Cannot update purchase invoice: The invoice was not found in the system. It may have been deleted.' });
   // Prevent duplicate invoice for same supplier (excluding current doc)
   const dup = await Purchase.exists({ supplier, invoice_number, _id: { $ne: purchase._id } });
-  if (dup) return res.status(409).json({ error: 'Duplicate invoice: this supplier already has an invoice with the same number.' });
+  if (dup) return res.status(409).json({ error: `Cannot update purchase invoice: Another invoice with number "${invoice_number}" already exists for supplier "${supplier}". Please use a different invoice number.` });
 
     await session.withTransaction(async () => {
       // 1. Reverse previous warehouse stock for each item in the old purchase
@@ -35,7 +49,7 @@ export const updatePurchase = async (req, res) => {
       // 2. Update warehouse stock for new items
       for (const { item, quantity, price } of items) {
         const itemDoc = await Item.findById(item).session(session);
-        if (!itemDoc) throw new Error(`Item not found: ${item}`);
+        if (!itemDoc) throw new Error(`Cannot update purchase invoice: The selected item (ID: ${item}) was not found in the system. Please select a valid item from the dropdown or refresh the page and try again.`);
         // Compute current on-hand across Warehouse, Store, Store2 BEFORE adding new qty
         const [whDoc, storeDoc, store2Doc] = await Promise.all([
           Warehouse.findOne({ item }).session(session),
@@ -68,9 +82,20 @@ export const updatePurchase = async (req, res) => {
     });
   } catch (err) {
     if (err && err.code === 11000) {
-      return res.status(409).json({ error: 'Duplicate invoice: this supplier already has an invoice with the same number.' });
+      const invNum = req.body.invoice_number || 'this number';
+      const suppName = req.body.supplier || 'this supplier';
+      return res.status(409).json({ error: `Cannot update purchase invoice: Invoice number "${invNum}" already exists for supplier "${suppName}". Each supplier must have unique invoice numbers. Please check your records or use a different invoice number.` });
     }
-    res.status(500).json({ error: err.message });
+    // Provide more context for other errors
+    let friendlyError = err.message;
+    if (err.message.includes('validation')) {
+      friendlyError = `Validation error: ${err.message}. Please check all fields and ensure quantities are positive numbers and prices are valid.`;
+    } else if (err.message.includes('network') || err.message.includes('connection')) {
+      friendlyError = 'Cannot update purchase invoice: Network connection issue. Please check your internet connection and try again.';
+    } else if (!err.message.includes('Cannot update purchase invoice')) {
+      friendlyError = `Cannot update purchase invoice: ${err.message}`;
+    }
+    res.status(500).json({ error: friendlyError });
   } finally {
     session.endSession();
   }
@@ -178,18 +203,32 @@ export const createPurchase = async (req, res) => {
   const session = await mongoose.startSession();
   try {
     const { error } = purchaseSchema.validate(req.body);
-    if (error) return res.status(400).json({ error: error.details[0].message });
+    if (error) {
+      let friendlyMessage = error.details[0].message;
+      if (error.details[0].path.includes('items')) {
+        friendlyMessage = 'Please add at least one item to the purchase invoice with valid quantity and price.';
+      } else if (error.details[0].path.includes('supplier')) {
+        friendlyMessage = 'Supplier name is required. Please enter the supplier name.';
+      } else if (error.details[0].path.includes('invoice_number')) {
+        friendlyMessage = 'Invoice number is required. Please enter a unique invoice number.';
+      } else if (error.details[0].path.includes('quantity')) {
+        friendlyMessage = 'Quantity must be at least 1 for all items.';
+      } else if (error.details[0].path.includes('price')) {
+        friendlyMessage = 'Price must be 0 or greater for all items.';
+      }
+      return res.status(400).json({ error: friendlyMessage });
+    }
     const { items, supplier, invoice_number } = req.body;
   // Prevent duplicate invoice for same supplier
   const dup = await Purchase.exists({ supplier, invoice_number });
-  if (dup) return res.status(409).json({ error: 'Duplicate invoice: this supplier already has an invoice with the same number.' });
+  if (dup) return res.status(409).json({ error: `Cannot save purchase invoice: A purchase invoice with number "${invoice_number}" already exists for supplier "${supplier}". Please use a different invoice number or check if this invoice was already entered.` });
 
     let createdPurchase;
     await session.withTransaction(async () => {
       // Process each item in the purchase
       for (const { item, quantity, price } of items) {
         const itemDoc = await Item.findById(item).session(session);
-        if (!itemDoc) throw new Error(`Item not found: ${item}`);
+        if (!itemDoc) throw new Error(`Cannot save purchase invoice: The selected item (ID: ${item}) was not found in the system. Please select a valid item from the dropdown or refresh the page and try again.`);
         // Compute total on-hand across Warehouse + Store + Store2 BEFORE adding new qty
         const [whDoc, storeDoc, store2Doc] = await Promise.all([
           Warehouse.findOne({ item }).session(session),
@@ -224,9 +263,20 @@ export const createPurchase = async (req, res) => {
     res.status(201).json(createdPurchase);
   } catch (err) {
     if (err && err.code === 11000) {
-      return res.status(409).json({ error: 'Duplicate invoice: this supplier already has an invoice with the same number.' });
+      const invNum = req.body.invoice_number || 'this number';
+      const suppName = req.body.supplier || 'this supplier';
+      return res.status(409).json({ error: `Cannot save purchase invoice: Invoice number "${invNum}" already exists for supplier "${suppName}". Each supplier must have unique invoice numbers. Please check your records or use a different invoice number.` });
     }
-    res.status(500).json({ error: err.message });
+    // Provide more context for other errors
+    let friendlyError = err.message;
+    if (err.message.includes('validation')) {
+      friendlyError = `Validation error: ${err.message}. Please check all fields and ensure quantities are positive numbers and prices are valid.`;
+    } else if (err.message.includes('network') || err.message.includes('connection')) {
+      friendlyError = 'Cannot save purchase invoice: Network connection issue. Please check your internet connection and try again.';
+    } else if (!err.message.includes('Cannot save purchase invoice')) {
+      friendlyError = `Cannot save purchase invoice: ${err.message}`;
+    }
+    res.status(500).json({ error: friendlyError });
   } finally {
     session.endSession();
   }

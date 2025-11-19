@@ -338,9 +338,21 @@ export const createTransfer = async (req, res) => {
   const session = await mongoose.startSession();
   try {
     const { error } = transferSchema.validate(req.body);
-    if (error) return res.status(400).json({ error: error.details[0].message });
+    if (error) {
+      let friendlyMessage = error.details[0].message;
+      if (error.details[0].path.includes('items')) {
+        friendlyMessage = '❌ Please add at least one item to the transfer with a valid quantity (minimum 1).';
+      } else if (error.details[0].path.includes('from')) {
+        friendlyMessage = '❌ Source location is required. Please select where to transfer items from (Warehouse, Store, or Store2).';
+      } else if (error.details[0].path.includes('to')) {
+        friendlyMessage = '❌ Destination location is required. Please select where to transfer items to (Warehouse, Store, or Store2).';
+      } else if (error.details[0].path.includes('quantity')) {
+        friendlyMessage = '❌ Quantity must be at least 1 for all items in the transfer.';
+      }
+      return res.status(400).json({ error: friendlyMessage });
+    }
     const { items, from, to, technician, workType } = req.body;
-    if (from === to) return res.status(400).json({ error: 'Source and destination must be different' });
+    if (from === to) return res.status(400).json({ error: '❌ Cannot create transfer: Source and destination locations must be different. Please select different locations for "From" and "To".' });
 
     // Convert empty string workType to undefined
     const cleanWorkType = workType === '' ? undefined : workType;
@@ -357,7 +369,9 @@ export const createTransfer = async (req, res) => {
         const fromQty = fromDoc ? (from === 'warehouse' ? fromDoc.quantity : fromDoc.remaining_quantity) : 0;
         
         if (!fromDoc || fromQty < quantity) {
-          throw new Error(`Not enough stock in ${from} for item ${item}. Available: ${fromQty}, Required: ${quantity}`);
+          const itemDoc = await Item.findById(item).session(session);
+          const itemName = itemDoc ? itemDoc.name : item;
+          throw new Error(`❌ Cannot create transfer: Not enough stock in ${from.toUpperCase()} for item "${itemName}". You are trying to transfer ${quantity} units but only ${fromQty} units are available. Please check the inventory and adjust the quantity.`);
         }
         
         stockChecks.push({ fromDoc, item, quantity });
@@ -426,7 +440,15 @@ export const createTransfer = async (req, res) => {
 
     res.status(201).json(transfer);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    let friendlyError = err.message;
+    if (err.message.includes('validation')) {
+      friendlyError = `❌ Validation error: ${err.message}. Please check all fields and ensure quantities are valid positive numbers.`;
+    } else if (err.message.includes('network') || err.message.includes('connection')) {
+      friendlyError = '❌ Cannot create transfer: Network connection issue. Please check your internet connection and try again.';
+    } else if (!err.message.includes('❌')) {
+      friendlyError = `❌ Cannot create transfer: ${err.message}`;
+    }
+    res.status(500).json({ error: friendlyError });
   } finally {
     session.endSession();
   }
@@ -437,7 +459,19 @@ export const updateTransfer = async (req, res) => {
   const session = await mongoose.startSession();
   try {
     const { error } = transferSchema.validate(req.body);
-    if (error) return res.status(400).json({ error: error.details[0].message });
+    if (error) {
+      let friendlyMessage = error.details[0].message;
+      if (error.details[0].path.includes('items')) {
+        friendlyMessage = '❌ Please add at least one item to the transfer with a valid quantity (minimum 1).';
+      } else if (error.details[0].path.includes('from')) {
+        friendlyMessage = '❌ Source location is required. Please select where to transfer items from (Warehouse, Store, or Store2).';
+      } else if (error.details[0].path.includes('to')) {
+        friendlyMessage = '❌ Destination location is required. Please select where to transfer items to (Warehouse, Store, or Store2).';
+      } else if (error.details[0].path.includes('quantity')) {
+        friendlyMessage = '❌ Quantity must be at least 1 for all items in the transfer.';
+      }
+      return res.status(400).json({ error: friendlyMessage });
+    }
     const { items, from, to, technician, workType } = req.body;
     
     // Convert empty string workType to undefined
@@ -445,7 +479,7 @@ export const updateTransfer = async (req, res) => {
     const cleanTechnician = technician === '' ? undefined : technician;
     
     const transfer = await Transfer.findById(req.params.id).session(session);
-    if (!transfer) return res.status(404).json({ error: 'Transfer not found' });
+    if (!transfer) return res.status(404).json({ error: '❌ Cannot update transfer: The transfer record was not found in the system. It may have been deleted or the ID is incorrect.' });
 
     let updatedTransfer;
 
@@ -492,7 +526,9 @@ export const updateTransfer = async (req, res) => {
         const fromQty = fromDoc ? (from === 'warehouse' ? fromDoc.quantity : fromDoc.remaining_quantity) : 0;
         
         if (!fromDoc || fromQty < quantity) {
-          throw new Error(`Not enough stock in ${from} for item ${item}. Available: ${fromQty}, Required: ${quantity}`);
+          const itemDoc = await Item.findById(item).session(session);
+          const itemName = itemDoc ? itemDoc.name : item;
+          throw new Error(`❌ Cannot update transfer: Not enough stock in ${from.toUpperCase()} for item "${itemName}". You are trying to transfer ${quantity} units but only ${fromQty} units are available. Please check the inventory and adjust the quantity.`);
         }
         
         stockChecks.push({ fromDoc, item, quantity });
@@ -547,7 +583,15 @@ export const updateTransfer = async (req, res) => {
 
     res.json(updatedTransfer);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    let friendlyError = err.message;
+    if (err.message.includes('validation')) {
+      friendlyError = `❌ Validation error: ${err.message}. Please check all fields and ensure quantities are valid positive numbers.`;
+    } else if (err.message.includes('network') || err.message.includes('connection')) {
+      friendlyError = '❌ Cannot update transfer: Network connection issue. Please check your internet connection and try again.';
+    } else if (!err.message.includes('❌')) {
+      friendlyError = `❌ Cannot update transfer: ${err.message}`;
+    }
+    res.status(500).json({ error: friendlyError });
   } finally {
     session.endSession();
   }
@@ -557,10 +601,14 @@ export const updateTransfer = async (req, res) => {
 export const deleteTransfer = async (req, res) => {
   try {
     const transfer = await Transfer.findById(req.params.id);
-    if (!transfer) return res.status(404).json({ error: 'Transfer not found' });
+    if (!transfer) return res.status(404).json({ error: '❌ Cannot delete transfer: The transfer record was not found in the system. It may have been already deleted.' });
     await Transfer.findByIdAndDelete(req.params.id);
     res.json({ success: true });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    let friendlyError = err.message;
+    if (!err.message.includes('❌')) {
+      friendlyError = `❌ Cannot delete transfer: ${err.message}. Please try again or contact support if the problem persists.`;
+    }
+    res.status(500).json({ error: friendlyError });
   }
 };

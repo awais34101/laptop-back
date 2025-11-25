@@ -33,6 +33,7 @@ import timeRoutes from './routes/timeRoutes.js';
 import checklistRoutes from './routes/checklistRoutes.js';
 import inventoryBoxRoutes from './routes/inventoryBoxRoutes.js';
 import biometricRoutes from './routes/biometricRoutes.js';
+import profitLossRoutes from './routes/profitLossRoutes.js';
 import errorHandler from './middleware/errorHandler.js';
 
 dotenv.config();
@@ -103,6 +104,7 @@ app.use('/api/time', timeRoutes);
 app.use('/api/checklists', checklistRoutes);
 app.use('/api/inventory-boxes', inventoryBoxRoutes);
 app.use('/api/biometric', biometricRoutes);
+app.use('/api/profit-loss', profitLossRoutes);
 
 // Closing summary route
 app.use('/api/closing', closingRoutes);

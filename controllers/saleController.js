@@ -72,7 +72,7 @@ const removeFromBoxesFIFO = async (itemId, quantity, location, session) => {
 
 export const getSales = async (req, res) => {
   try {
-    const { from, to } = req.query;
+    const { from, to, item } = req.query;
     const page = Math.max(parseInt(req.query.page) || 1, 1);
     const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 100);
     const skip = (page - 1) * limit;
@@ -85,6 +85,10 @@ export const getSales = async (req, res) => {
         toDate.setHours(23, 59, 59, 999);
         filter.date.$lte = toDate;
       }
+    }
+    // Filter by item - search in items array
+    if (item) {
+      filter['items.item'] = item;
     }
     const [total, sales] = await Promise.all([
       Sale.countDocuments(filter),

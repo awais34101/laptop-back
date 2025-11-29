@@ -178,6 +178,11 @@ export const getTransfers = async (req, res) => {
       filter.to = req.query.to;
     }
     
+    // Filter by item - search in items array
+    if (req.query.item) {
+      filter['items.item'] = req.query.item;
+    }
+    
     // Filter by date range
     if (req.query.startDate || req.query.endDate) {
       filter.date = {};
@@ -235,6 +240,11 @@ const getTransfersByDate = async (req, res) => {
     // Filter by to location
     if (req.query.to) {
       filter.to = req.query.to;
+    }
+    
+    // Filter by item - search in items array
+    if (req.query.item) {
+      filter['items.item'] = req.query.item;
     }
     
     // Filter by date range

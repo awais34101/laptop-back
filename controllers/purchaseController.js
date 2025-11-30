@@ -411,12 +411,28 @@ export const getPurchaseSheets = async (req, res) => {
       };
     }));
 
+    // Calculate aggregate statistics when filtering by technician
+    let aggregateStats = null;
+    if (technicianFilter && matchedIdsOrdered.length > 0) {
+      // Get progress for ALL matched sheets (not just current page)
+      const allProgressPromises = matchedIdsOrdered.map(id => computeSheetProgress(id));
+      const allProgress = await Promise.all(allProgressPromises);
+      
+      aggregateStats = {
+        totalSheets: matchedIdsOrdered.length,
+        totalQuantity: allProgress.reduce((sum, p) => sum + (p?.totalPurchased || 0), 0),
+        totalTransferred: allProgress.reduce((sum, p) => sum + (p?.totalTransferred || 0), 0),
+        totalBalance: allProgress.reduce((sum, p) => sum + (p?.totalRemaining || 0), 0)
+      };
+    }
+
     return res.json({
       data: sheetsData,
       total,
       page,
       pageSize: limit,
       totalPages: Math.ceil(total / limit) || 1,
+      aggregateStats,
     });
   } catch (err) {
     res.status(500).json({ error: err.message });

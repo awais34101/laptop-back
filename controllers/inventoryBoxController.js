@@ -57,7 +57,7 @@ export const getBox = async (req, res) => {
 // Search for item by name or box number
 export const searchBoxes = async (req, res) => {
   try {
-    const { query } = req.query;
+    const { query, location } = req.query;
     
     if (!query) {
       return res.status(400).json({ error: 'Search query is required' });
@@ -81,7 +81,65 @@ export const searchBoxes = async (req, res) => {
     const allMatches = [...boxMatches, ...itemMatches];
     const uniqueBoxes = Array.from(new Map(allMatches.map(box => [box._id.toString(), box])).values());
 
-    res.json(uniqueBoxes);
+    // Calculate item summary - search in inventory and boxes
+    let itemSummary = null;
+    if (location) {
+      // Determine inventory model
+      let inventoryModel;
+      if (location === 'Warehouse') inventoryModel = Warehouse;
+      else if (location === 'Store') inventoryModel = Store;
+      else inventoryModel = Store2;
+
+      // Search in inventory for items matching the query
+      const inventoryItems = await inventoryModel.find().populate('item', 'name unit category');
+      const matchedInventory = inventoryItems.filter(inv => 
+        inv.item && inv.item.name && inv.item.name.toLowerCase().includes(query.toLowerCase())
+      );
+
+      // Get all boxes for this location to calculate quantities in boxes
+      const allBoxes = await InventoryBox.find({ location });
+      
+      const itemSummaries = [];
+      
+      for (const inventory of matchedInventory) {
+        const itemId = inventory.item._id.toString();
+        const itemName = inventory.item.name;
+        const totalQty = location === 'Warehouse' ? inventory.quantity : inventory.remaining_quantity;
+        
+        // Calculate quantity in boxes
+        let quantityInBoxes = 0;
+        let numberOfBoxes = 0;
+        
+        for (const box of allBoxes) {
+          for (const item of box.items) {
+            if (item.itemId && item.itemId.toString() === itemId) {
+              quantityInBoxes += item.quantity || 0;
+              numberOfBoxes += 1;
+              break; // Count each box only once
+            }
+          }
+        }
+        
+        itemSummaries.push({
+          itemId,
+          itemName,
+          totalAvailable: totalQty,
+          quantityInBoxes,
+          numberOfBoxes,
+          unassigned: totalQty - quantityInBoxes,
+          inInventory: true
+        });
+      }
+
+      if (itemSummaries.length > 0) {
+        itemSummary = itemSummaries;
+      }
+    }
+
+    res.json({
+      boxes: uniqueBoxes,
+      itemSummary
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

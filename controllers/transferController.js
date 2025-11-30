@@ -183,6 +183,11 @@ export const getTransfers = async (req, res) => {
       filter['items.item'] = req.query.item;
     }
     
+    // Filter by status
+    if (req.query.status) {
+      filter.status = req.query.status;
+    }
+    
     // Filter by date range
     if (req.query.startDate || req.query.endDate) {
       filter.date = {};
@@ -205,6 +210,7 @@ export const getTransfers = async (req, res) => {
         .limit(limit)
         .populate('items.item')
         .populate('technician')
+        .populate('verifiedBy', 'username name')
     ]);
 
     res.json({
@@ -620,5 +626,50 @@ export const deleteTransfer = async (req, res) => {
       friendlyError = `❌ Cannot delete transfer: ${err.message}. Please try again or contact support if the problem persists.`;
     }
     res.status(500).json({ error: friendlyError });
+  }
+};
+
+// Verify a transfer sheet
+export const verifyTransfer = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status, verificationNotes } = req.body;
+
+    // Validate status
+    if (!['verified', 'discrepancy'].includes(status)) {
+      return res.status(400).json({ error: 'Status must be either "verified" or "discrepancy"' });
+    }
+
+    const transfer = await Transfer.findById(id);
+    if (!transfer) {
+      return res.status(404).json({ error: 'Transfer not found' });
+    }
+
+    // Check if already verified
+    if (transfer.verified) {
+      return res.status(400).json({ error: 'This transfer has already been verified' });
+    }
+
+    // Update verification fields
+    transfer.verified = true;
+    transfer.verifiedBy = req.user.userId;
+    transfer.verifiedAt = new Date();
+    transfer.status = status;
+    transfer.verificationNotes = verificationNotes || '';
+
+    await transfer.save();
+
+    // Populate for response
+    await transfer.populate('verifiedBy', 'username name');
+    await transfer.populate('items.item');
+    await transfer.populate('technician');
+
+    res.json({
+      message: 'Transfer verified successfully',
+      transfer
+    });
+  } catch (err) {
+    console.error('Error verifying transfer:', err);
+    res.status(500).json({ error: err.message });
   }
 };

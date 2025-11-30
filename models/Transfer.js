@@ -15,6 +15,12 @@ const transferSchema = new mongoose.Schema({
   // Optional links to a purchase sheet assignment for per-sheet tracking
   purchaseId: { type: mongoose.Schema.Types.ObjectId, ref: 'Purchase' },
   assignmentId: { type: mongoose.Schema.Types.ObjectId, ref: 'SheetAssignment' },
+  // Verification fields
+  verified: { type: Boolean, default: false },
+  verifiedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+  verifiedAt: { type: Date },
+  verificationNotes: { type: String },
+  status: { type: String, enum: ['pending', 'verified', 'discrepancy'], default: 'pending' },
 });
 
 // Indexes for faster date filtering

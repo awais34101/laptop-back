@@ -41,9 +41,10 @@ const removeFromBoxesFIFO = async (itemId, quantity, location, session) => {
     itemInBox.quantity -= qtyToRemove;
     remainingQty -= qtyToRemove;
 
-    // Remove item from box if quantity is 0
-    if (itemInBox.quantity <= 0) {
-      box.items.splice(itemIndex, 1);
+    // Keep item in box even if quantity is 0 (for auto-fill when new stock arrives)
+    // DO NOT DELETE: box will remember this item and auto-fill when stock comes
+    if (itemInBox.quantity < 0) {
+      itemInBox.quantity = 0; // Ensure never negative
     }
 
     // Update box status

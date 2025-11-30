@@ -594,9 +594,10 @@ export const removeItemsFromBoxes = async (req, res) => {
       itemInBox.quantity -= qtyToRemove;
       remainingQty -= qtyToRemove;
 
-      // Remove item from box if quantity is 0
-      if (itemInBox.quantity <= 0) {
-        box.items.splice(itemIndex, 1);
+      // Keep item in box even if quantity is 0 (for auto-fill when new stock arrives)
+      // DO NOT DELETE: box will remember this item and auto-fill when stock comes
+      if (itemInBox.quantity < 0) {
+        itemInBox.quantity = 0; // Ensure never negative
       }
 
       // Update box status
@@ -809,7 +810,40 @@ export const autoReplenishAllBoxes = async (req, res) => {
       let itemBoxesUpdated = 0;
       let itemQtyReplenished = 0;
 
-      // Distribute unassigned items to their original boxes
+      // PRIORITY: First fill boxes that have this item with quantity 0 (previously sold out)
+      const emptyBoxesWithItem = targetBoxes.filter(box => {
+        const existingItem = box.items.find(item => item.itemId && item.itemId.toString() === itemId);
+        return existingItem && existingItem.quantity === 0;
+      });
+
+      // Refill empty boxes first
+      for (const box of emptyBoxesWithItem) {
+        if (remainingToAssign <= 0) break;
+        
+        const currentItems = box.items.reduce((sum, item) => sum + item.quantity, 0);
+        const availableSpace = box.capacity - currentItems;
+        const existingItemIndex = box.items.findIndex(item => 
+          item.itemId && item.itemId.toString() === itemId
+        );
+        
+        const canAdd = Math.min(remainingToAssign, availableSpace);
+        
+        if (canAdd > 0 && existingItemIndex > -1) {
+          box.items[existingItemIndex].quantity = canAdd;
+          box.items[existingItemIndex].notes = `Auto-refilled on ${new Date().toLocaleDateString()}`;
+          
+          remainingToAssign -= canAdd;
+          itemQtyReplenished += canAdd;
+          itemBoxesUpdated++;
+          
+          const newTotal = box.items.reduce((sum, item) => sum + item.quantity, 0);
+          box.status = newTotal >= box.capacity ? 'Full' : 'Active';
+          box.updatedAt = Date.now();
+          await box.save();
+        }
+      }
+
+      // Then fill remaining boxes with available space
       for (const box of targetBoxes) {
         if (remainingToAssign <= 0) break;
         
@@ -821,6 +855,11 @@ export const autoReplenishAllBoxes = async (req, res) => {
             item.itemId && item.itemId.toString() === itemId
           );
           
+          // Skip if already processed in priority (empty boxes)
+          if (existingItemIndex > -1 && box.items[existingItemIndex].quantity === 0) {
+            continue; // Already handled above
+          }
+
           const canAdd = Math.min(remainingToAssign, availableSpace);
           
           if (canAdd > 0) {
@@ -839,7 +878,6 @@ export const autoReplenishAllBoxes = async (req, res) => {
             itemQtyReplenished += canAdd;
             itemBoxesUpdated++;
             
-            // Update box status
             const newTotal = box.items.reduce((sum, item) => sum + item.quantity, 0);
             box.status = newTotal >= box.capacity ? 'Full' : 'Active';
             box.updatedAt = Date.now();
@@ -953,7 +991,46 @@ export const autoReplenishBoxes = async (req, res) => {
     let totalReplenished = 0;
     let remainingToAssign = unassigned;
 
-    // For each box, check if it has available space
+    // PRIORITY 1: First fill boxes that have this item with quantity 0 (previously sold out)
+    const emptyBoxesWithItem = boxes.filter(box => {
+      const existingItem = box.items.find(item => item.itemId && item.itemId.toString() === itemId);
+      return existingItem && existingItem.quantity === 0 && box.status !== 'Inactive';
+    });
+
+    console.log(`[AutoReplenish] Found ${emptyBoxesWithItem.length} empty boxes that previously had ${itemName}`);
+
+    for (const box of emptyBoxesWithItem) {
+      if (remainingToAssign <= 0) break;
+
+      const existingItemIndex = box.items.findIndex(item => item.itemId && item.itemId.toString() === itemId);
+      const currentItems = box.items.reduce((sum, item) => sum + item.quantity, 0);
+      const availableSpace = box.capacity - currentItems;
+      const canAdd = Math.min(remainingToAssign, availableSpace);
+
+      if (canAdd > 0) {
+        box.items[existingItemIndex].quantity = canAdd;
+        box.items[existingItemIndex].notes = `Auto-refilled on ${new Date().toLocaleDateString()}`;
+        
+        remainingToAssign -= canAdd;
+        totalReplenished += canAdd;
+        
+        replenishedBoxes.push({
+          boxNumber: box.boxNumber,
+          itemName,
+          quantityAdded: canAdd,
+          type: 'refilled'
+        });
+
+        const newTotal = box.items.reduce((sum, item) => sum + item.quantity, 0);
+        box.status = newTotal >= box.capacity ? 'Full' : 'Active';
+        box.updatedAt = Date.now();
+        await box.save();
+
+        console.log(`[AutoReplenish] Refilled ${canAdd} of ${itemName} in Box #${box.boxNumber} (was empty)`);
+      }
+    }
+
+    // PRIORITY 2: Then fill boxes with available space (partially filled or new)
     for (const box of boxes) {
       if (remainingToAssign <= 0) break;
       
@@ -961,20 +1038,37 @@ export const autoReplenishBoxes = async (req, res) => {
       let availableSpace = box.capacity - currentItems;
       
       if (availableSpace > 0 && box.status !== 'Inactive') {
-        console.log(`[AutoReplenish] Box #${box.boxNumber} has ${availableSpace} available spaces`);
-        
-        // Check if this item is already in the box
         const existingItemIndex = box.items.findIndex(item => item.itemId && item.itemId.toString() === itemId);
         
-        const canAdd = Math.min(remainingToAssign, availableSpace);
-        
-        if (canAdd > 0) {
-          if (existingItemIndex > -1) {
-            // Update existing item
+        // Skip if already processed in priority 1
+        if (existingItemIndex > -1 && box.items[existingItemIndex].quantity > 0) {
+          // This box already has some quantity, can add more
+          const canAdd = Math.min(remainingToAssign, availableSpace);
+          
+          if (canAdd > 0) {
             box.items[existingItemIndex].quantity += canAdd;
-            console.log(`[AutoReplenish] Replenished ${canAdd} of ${itemName} to Box #${box.boxNumber} (existing item)`);
-          } else {
-            // Add new item to box
+            console.log(`[AutoReplenish] Added ${canAdd} more of ${itemName} to Box #${box.boxNumber}`);
+            
+            remainingToAssign -= canAdd;
+            totalReplenished += canAdd;
+            
+            replenishedBoxes.push({
+              boxNumber: box.boxNumber,
+              itemName,
+              quantityAdded: canAdd,
+              type: 'added'
+            });
+            
+            const newTotal = box.items.reduce((sum, item) => sum + item.quantity, 0);
+            box.status = newTotal >= box.capacity ? 'Full' : 'Active';
+            box.updatedAt = Date.now();
+            await box.save();
+          }
+        } else if (existingItemIndex === -1) {
+          // Box doesn't have this item, can add if there's space
+          const canAdd = Math.min(remainingToAssign, availableSpace);
+          
+          if (canAdd > 0) {
             box.items.push({
               itemId,
               itemName,
@@ -982,27 +1076,22 @@ export const autoReplenishBoxes = async (req, res) => {
               notes: `Auto-replenished on ${new Date().toLocaleDateString()}`
             });
             console.log(`[AutoReplenish] Added ${canAdd} of ${itemName} to Box #${box.boxNumber} (new item)`);
+            
+            remainingToAssign -= canAdd;
+            totalReplenished += canAdd;
+            
+            replenishedBoxes.push({
+              boxNumber: box.boxNumber,
+              itemName,
+              quantityAdded: canAdd,
+              type: 'new'
+            });
+            
+            const newTotal = box.items.reduce((sum, item) => sum + item.quantity, 0);
+            box.status = newTotal >= box.capacity ? 'Full' : 'Active';
+            box.updatedAt = Date.now();
+            await box.save();
           }
-          
-          remainingToAssign -= canAdd;
-          totalReplenished += canAdd;
-          
-          replenishedBoxes.push({
-            boxNumber: box.boxNumber,
-            itemName,
-            quantityAdded: canAdd
-          });
-          
-          // Update box status
-          const newTotal = box.items.reduce((sum, item) => sum + item.quantity, 0);
-          if (newTotal >= box.capacity) {
-            box.status = 'Full';
-          } else {
-            box.status = 'Active';
-          }
-          
-          box.updatedAt = Date.now();
-          await box.save();
         }
       }
     }

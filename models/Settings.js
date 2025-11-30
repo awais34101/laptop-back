@@ -1,7 +1,9 @@
 import mongoose from 'mongoose';
 
 const settingsSchema = new mongoose.Schema({
-  low_stock_days: { type: Number, default: 7 },
+  low_stock_threshold_warehouse: { type: Number, default: 5 },
+  low_stock_threshold_store: { type: Number, default: 3 },
+  low_stock_threshold_store2: { type: Number, default: 3 },
   slow_moving_days: { type: Number, default: 30 },
   inactive_customer_days: { type: Number, default: 30 }, // Alert if customer hasn't purchased in X days
   auto_delete_sales_days: { type: Number, default: 365 }, // Auto delete sales invoices after X days

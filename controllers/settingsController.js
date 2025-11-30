@@ -24,7 +24,9 @@ export const updateSettings = async (req, res) => {
     if (!settings) {
       settings = await Settings.create({});
     }
-    settings.low_stock_days = req.body.low_stock_days;
+    settings.low_stock_threshold_warehouse = req.body.low_stock_threshold_warehouse;
+    settings.low_stock_threshold_store = req.body.low_stock_threshold_store;
+    settings.low_stock_threshold_store2 = req.body.low_stock_threshold_store2;
     settings.slow_moving_days = req.body.slow_moving_days;
     settings.auto_delete_sales_days = req.body.auto_delete_sales_days;
     settings.auto_delete_purchase_days = req.body.auto_delete_purchase_days;
